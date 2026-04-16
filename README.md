@@ -291,7 +291,13 @@ Every mutation is recorded in an internal `audit_log` table. There is no API for
 
 ## Further reading
 
-For day-to-day operator tasks that are not exposed through the MCP server (creating teams, issuing API keys, restoring soft-deleted resources, inspecting the audit log), see [docs/operators.md](docs/operators.md). It is a short cookbook of curl recipes for the things a human running the server will actually need.
+Three supplementary documents live under [docs/](docs/).
+
+The [REST API reference](docs/api.md) documents every endpoint with request and response shapes, required authorization tier, and a curl example of each. Read this when you want the precise contract for something the README only sketches at a conceptual level.
+
+The [MCP reference](docs/mcp.md) documents each of the fifteen MCP tools with its argument schema, return shape, and an example invocation. Read this when integrating an MCP client, or when debugging why an agent is picking or misusing a particular tool.
+
+The [operator cookbook](docs/operators.md) is a short collection of curl recipes for the admin-only workflows the MCP server does not expose: creating teams, issuing API keys, restoring soft-deleted resources, inspecting the audit log, and a few debugging tricks.
 
 ## Building from source
 
