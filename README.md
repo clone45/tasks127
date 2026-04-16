@@ -219,6 +219,10 @@ The tool surface is deliberately small, about fifteen tools covering the common 
 
 Every mutation is recorded in an internal `audit_log` table. There is no API for querying it yet. For now, if something goes wrong and you need to reconstruct what happened, query the database directly. An API for audit inspection is an obvious future addition.
 
+## Further reading
+
+For day-to-day operator tasks that are not exposed through the MCP server (creating teams, issuing API keys, restoring soft-deleted resources, inspecting the audit log), see [docs/operators.md](docs/operators.md). It is a short cookbook of curl recipes for the things a human running the server will actually need.
+
 ## Building from source
 
 You need Go 1.22 or later. The project uses only pure Go dependencies, so no CGO is involved.
