@@ -37,13 +37,21 @@ t127_AbC123...
 tasks127 listening on 127.0.0.1:8080
 ```
 
+If you lose the key while you are still in development, the easiest recovery is to stop the server, delete the SQLite file, and let it regenerate on the next start. Obviously that is not a recovery path once you have real data, so capture the key now while it is cheap.
+
 From this point on you can talk to the API with any HTTP client. Every request needs an `Authorization: Bearer <key>` header.
 
-Create a team. The three letter key is required and becomes the prefix for ticket display IDs like ENG-1.
+A good first call is `GET /v1/whoami`. It confirms your key is valid and tells you exactly what the server thinks you are. The response includes your tier, your user ID if applicable, and the on-behalf-of value if you sent that header. This saves a lot of debugging time later when something is not behaving the way you expect, because you can always check whether the issue is "the server disagrees about who I am" before digging deeper.
 
 ```bash
 KEY='t127_AbC123...'
 
+curl -H "Authorization: Bearer $KEY" http://127.0.0.1:8080/v1/whoami
+```
+
+Now create a team. The three letter key is required and becomes the prefix for ticket display IDs like ENG-1.
+
+```bash
 curl -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"key":"ENG","name":"Engineering"}' \
   http://127.0.0.1:8080/v1/teams
@@ -193,7 +201,7 @@ curl -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"
   http://127.0.0.1:8080/v1/subscriptions/<id>/ack
 ```
 
-If your agent can receive HTTP, add a `webhook_url` to the subscription and the server will push events to it. The URL has to point at localhost in the default build. The create response will include a `webhook_secret` exactly once, and you should store it somewhere safe. Verify the HMAC SHA-256 signature on incoming deliveries, which is sent in the `X-Tasks127-Signature` header. The signed value is the timestamp, a literal period, and the request body, all concatenated.
+If your agent can receive HTTP, add a `webhook_url` to the subscription and the server will push events to it. The URL has to point at localhost in the default build. If your agent is running on a different machine, the subscription will be rejected at create time with a clear error; support for external webhook URLs with the corresponding SSRF defenses is a future addition. The create response will include a `webhook_secret` exactly once, and you should store it somewhere safe. Verify the HMAC SHA-256 signature on incoming deliveries, which is sent in the `X-Tasks127-Signature` header. The signed value is the timestamp, a literal period, and the request body, all concatenated.
 
 The server retries failed deliveries with exponential backoff up to six attempts (30s, 2m, 10m, 1h, 4h, give up). If every attempt fails, the event is still sitting in the inbox waiting for your next heartbeat. The inbox is the source of truth. Webhooks are a fast-path optimization on top.
 
