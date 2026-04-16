@@ -41,6 +41,22 @@ Throughout this document, examples show the tool's JSON arguments as they would 
 
 ## Tools
 
+### get_config
+
+Return deployment configuration the agent is allowed to see. Currently the only field is `default_webhook_url`, which is either the URL the operator has configured as the agent's webhook receiver, or `null` if the operator did not set one.
+
+Arguments: none.
+
+Returns:
+
+```json
+{
+  "default_webhook_url": "http://r1n-bridge:8080/tasks127-events"
+}
+```
+
+Call this before `watch` when you need to know where to send webhook deliveries in this deployment. If the field is null, fall back to asking the operator for a URL.
+
 ### whoami
 
 Return the effective identity for the current session. Useful as a first call to verify that the MCP server can reach the REST API, that the configured key is valid, and that on-behalf-of is behaving as expected.

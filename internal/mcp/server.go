@@ -63,6 +63,15 @@ func registerTools(s *sdk.Server, c *Client) {
 			"to see who belongs to a team. team accepts a team_id or a 3-letter key.",
 	}, toolListTeamMembers(c))
 
+	sdk.AddTool(s, &sdk.Tool{
+		Name: "get_config",
+		Description: "Return deployment configuration the agent is allowed to see. Currently " +
+			"the only field is default_webhook_url, which is either a URL the operator has " +
+			"configured as the agent's webhook receiver, or null if the operator did not set " +
+			"one. Call this before 'watch' when you need to know where to send webhook " +
+			"deliveries in this deployment; if it is null, fall back to asking the operator.",
+	}, toolGetConfig(c))
+
 	// --- user management -------------------------------------------------------
 
 	sdk.AddTool(s, &sdk.Tool{
@@ -308,6 +317,18 @@ func registerTools(s *sdk.Server, c *Client) {
 // REST call via the client and format the response as a TextContent block
 // containing pretty-printed JSON. Errors (including APIError) propagate
 // unchanged; the SDK will convert them into an MCP tool-error response.
+
+func toolGetConfig(c *Client) sdk.ToolHandlerFor[noArgs, any] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, _ noArgs) (*sdk.CallToolResult, any, error) {
+		var out any
+		if err := c.get(ctx, "/v1/config", &out); err != nil {
+			return nil, nil, err
+		}
+		return asJSON(out), nil, nil
+	}
+}
+
+type noArgs struct{}
 
 type whoamiArgs struct {
 	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to check the effective identity for; useful to verify on-behalf-of scoping works"`

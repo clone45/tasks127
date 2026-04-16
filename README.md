@@ -84,6 +84,7 @@ TASKS127_DATABASE_URL               default sqlite://./tasks127.db
 TASKS127_LOG_LEVEL                  default info
 TASKS127_MIGRATE_ON_START           default true
 TASKS127_WEBHOOK_ALLOWED_HOSTS      default empty (loopback only; see webhooks section)
+TASKS127_DEFAULT_WEBHOOK_URL        default empty (returned by GET /v1/config for agent discovery)
 
 # MCP server (only read by the `tasks127 mcp` subcommand)
 TASKS127_URL                        default http://127.0.0.1:8080
@@ -93,6 +94,8 @@ TASKS127_API_KEY                    required, no default
 If you want the server reachable from outside localhost, set `TASKS127_BIND` to an external address. You will almost certainly want a TLS terminator like Caddy or nginx in front of it, since tasks127 does not do TLS on its own.
 
 There is also a `GET /healthz` endpoint that requires no authentication and returns `{"status":"ok"}`. It is the right thing to point a Docker healthcheck or uptime monitor at.
+
+If you are wiring tasks127 up to an agent that wants to register webhook subscriptions, `TASKS127_DEFAULT_WEBHOOK_URL` is worth setting. It holds the URL the agent should point webhooks at (for example, the inbound endpoint on a sidecar like r1n-bridge), and the agent reads it via a small discovery endpoint rather than having the URL hardcoded in its own configuration. Set this once in tasks127's environment and both the REST API and the MCP server will surface it to any authenticated caller.
 
 ## Running under Docker
 
@@ -325,6 +328,7 @@ The one administrative area still reserved for the operator is API key managemen
 
 ```
 whoami              return the effective identity (tier, user, on-behalf-of)
+get_config          read deployment hints the operator configured (e.g. default webhook URL)
 list_teams          list teams visible to the caller
 list_projects       list projects, optionally filtered by team
 search_users        find users by name or email substring
@@ -370,7 +374,7 @@ list_subscriptions  list the caller's subscriptions
 list_deliveries     list recent webhook delivery attempts with status codes
 ```
 
-That is 37 tools. Several accept either a single id or a filter so that the single-item and bulk shapes collapse into one tool (notably `update_tickets` and `delete_tickets`), which helps a little. Over time, as models improve at handling larger tool sets, the tradeoff gets easier.
+That is 38 tools. Several accept either a single id or a filter so that the single-item and bulk shapes collapse into one tool (notably `update_tickets` and `delete_tickets`), which helps a little. Over time, as models improve at handling larger tool sets, the tradeoff gets easier.
 
 ### Audit log
 

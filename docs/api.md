@@ -120,6 +120,34 @@ curl $A/healthz
 
 ## Identity
 
+### GET /v1/config
+
+Returns the deployment configuration the agent is allowed to see. Currently this is a single field, `default_webhook_url`, which is either the URL the operator has designated as the agent's webhook receiver, or `null` if the operator did not set one (`TASKS127_DEFAULT_WEBHOOK_URL` is empty). Requires authentication.
+
+Scoping this endpoint as "config" rather than "webhook URL" leaves room for additional deployment hints in future without having to add new endpoints.
+
+```bash
+curl -H "Authorization: Bearer $KEY" $A/v1/config
+```
+
+Response:
+
+```json
+{
+  "default_webhook_url": "http://r1n-bridge:8080/tasks127-events"
+}
+```
+
+Or, when unset:
+
+```json
+{
+  "default_webhook_url": null
+}
+```
+
+An agent writing a subscription normally calls this first, then passes the URL to `POST /v1/subscriptions`. If the field is null, the agent is expected to fall back to asking the operator.
+
 ### GET /v1/whoami
 
 Returns the effective identity for the current request. Useful for verifying that your API key works and for checking how the server sees an on-behalf-of header.

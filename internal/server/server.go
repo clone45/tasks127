@@ -46,6 +46,7 @@ func (s *Server) routes() {
 
 	v1 := http.NewServeMux()
 	v1.HandleFunc("GET /v1/whoami", s.handleWhoami)
+	v1.HandleFunc("GET /v1/config", s.handleGetConfig)
 
 	// Users
 	v1.HandleFunc("PATCH /v1/users", s.handleBulkUpdateUsers)
@@ -134,6 +135,24 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, auth.FromContext(r.Context()))
+}
+
+// handleGetConfig returns the deployment configuration the agent is allowed
+// to see. Right now that is just the default webhook URL (if the operator
+// configured one); scoping it as "config" rather than "webhook URL" lets us
+// add future deployment hints without introducing new endpoints.
+//
+// A null default_webhook_url means the operator did not set one. Callers that
+// need a webhook URL should fall back to asking the operator.
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	var defaultWebhookURL *string
+	if s.cfg.DefaultWebhookURL != "" {
+		u := s.cfg.DefaultWebhookURL
+		defaultWebhookURL = &u
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"default_webhook_url": defaultWebhookURL,
+	})
 }
 
 // --- shared helpers ---
