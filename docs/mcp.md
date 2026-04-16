@@ -126,6 +126,210 @@ Arguments:
 
 `contains` is case-insensitive and matches either the name or email. Returns a search envelope of user rows (without email when scoping makes it inappropriate to show).
 
+### list_team_members
+
+List team memberships, optionally filtered to a specific team.
+
+Arguments:
+
+```json
+{
+  "team": "ENG",
+  "limit": 50,
+  "on_behalf_of": "01HX..."
+}
+```
+
+All optional. `team` accepts a team_id or a 3-letter key. Returns a search envelope of membership rows, each with its own id, team_id, and user_id. Use this to see who belongs to a team.
+
+## User management
+
+### create_user
+
+Create a new user. Admin only (requires the configured API key to be admin-tier without on-behalf-of).
+
+Arguments:
+
+```json
+{
+  "name": "Alice",
+  "email": "alice@example.com"
+}
+```
+
+A common reason to call this is to provision an identity for an agent or service account that needs to author comments or be assigned tickets.
+
+Returns the created user row.
+
+### update_user
+
+Update a user's name or email. A user can update themselves (pass `on_behalf_of` when calling as admin); admin-unrestricted can update anyone.
+
+Arguments:
+
+```json
+{
+  "id": "01HX...",
+  "name": "Alice Smith",
+  "on_behalf_of": "01HX..."
+}
+```
+
+Pass only the fields you want to change. Returns the updated row.
+
+### delete_user
+
+Soft-delete a user. Admin only.
+
+Arguments:
+
+```json
+{"id": "01HX..."}
+```
+
+The user's tickets and comments remain in place; only the user row is marked deleted. Reversible via `restore_user`.
+
+### restore_user
+
+Restore a soft-deleted user. Admin only. Takes the raw user id, since deleted users are not findable through `search_users`.
+
+Arguments:
+
+```json
+{"id": "01HX..."}
+```
+
+Returns 409 if the user's email now collides with an active user.
+
+## Team management
+
+### create_team
+
+Create a new team. Admin only. The key must be exactly 3 uppercase letters and globally unique across teams and projects.
+
+Arguments:
+
+```json
+{
+  "key": "ENG",
+  "name": "Engineering"
+}
+```
+
+### update_team
+
+Rename a team. Admin only. The key itself is immutable (changing it would break ticket display IDs).
+
+Arguments:
+
+```json
+{
+  "team": "ENG",
+  "name": "Engineering (org-wide)"
+}
+```
+
+`team` accepts id or 3-letter key.
+
+### delete_team
+
+Soft-delete a team. Admin only. Tickets and projects in the team remain; only the team row is hidden. Reversible via `restore_team`.
+
+Arguments:
+
+```json
+{"team": "ENG"}
+```
+
+### restore_team
+
+Restore a soft-deleted team. Admin only. Takes the raw team id, since deleted teams are not findable by key.
+
+Arguments:
+
+```json
+{"id": "01HX..."}
+```
+
+## Project management
+
+### create_project
+
+Create a new project within a team. Admin only. `key` must be 3 uppercase letters, globally unique. `team` accepts id or key.
+
+Arguments:
+
+```json
+{
+  "key": "BAK",
+  "team": "ENG",
+  "name": "Backend"
+}
+```
+
+### update_project
+
+Rename a project. Admin only.
+
+Arguments:
+
+```json
+{
+  "project": "BAK",
+  "name": "Backend Services"
+}
+```
+
+### delete_project
+
+Soft-delete a project. Admin only. Tickets in the project keep their display IDs (the project's key is baked into each ticket at creation time), so deleting a project does not break existing ticket references.
+
+Arguments:
+
+```json
+{"project": "BAK"}
+```
+
+### restore_project
+
+Restore a soft-deleted project. Admin only. Takes the raw project id.
+
+Arguments:
+
+```json
+{"id": "01HX..."}
+```
+
+## Team membership
+
+### add_team_member
+
+Add a user to a team. Admin only. `team` accepts id or 3-letter key; `user` is a user id.
+
+Arguments:
+
+```json
+{
+  "team": "ENG",
+  "user": "01HX..."
+}
+```
+
+This is how visibility is extended. A user-tier caller sees only the teams they belong to.
+
+### remove_team_member
+
+Remove a user from a team. Admin only. Takes the team (id or key) and user (user_id); looks up the membership row internally so you do not need to know its id.
+
+Arguments:
+
+```json
+{
+  "team": "ENG",
+  "user": "01HX..."
+}
+```
+
 ### create_ticket
 
 Create a new ticket. The `team` and `project` arguments accept either ULIDs or three letter keys, so the agent does not need a separate resolution round-trip after `list_teams` or `list_projects`.
@@ -240,7 +444,22 @@ Arguments (bulk):
 }
 ```
 
-Returns the deleted ticket row (single form) or an affected count (bulk form). Deletion is reversible via the REST API's `/restore` endpoint; the MCP surface does not currently expose restore for tickets because it is an uncommon agent operation.
+Returns the deleted ticket row (single form) or an affected count (bulk form). Reversible via `restore_ticket`.
+
+### restore_ticket
+
+Restore a soft-deleted ticket. Caller must have access to the ticket's team.
+
+Arguments:
+
+```json
+{
+  "id": "BAK-1",
+  "on_behalf_of": "01HX..."
+}
+```
+
+`id` accepts a ULID or a display ID.
 
 ### add_comment
 
@@ -286,6 +505,50 @@ Arguments:
 `order_by` is optional. When omitted the tool injects `[{"field": "created_at", "dir": "asc"}]` automatically. This differs from the REST `/v1/comments/search` default (created_at DESC), because the agent-facing reading order is usually the reverse of the REST search default.
 
 Returns a search envelope of comment rows.
+
+### edit_comment
+
+Edit a comment's body. The comment's author can edit their own; admin-unrestricted can edit anyone's.
+
+Arguments:
+
+```json
+{
+  "id": "01HX...",
+  "body": "Edited text",
+  "on_behalf_of": "01HX..."
+}
+```
+
+Returns the updated comment row.
+
+### delete_comment
+
+Soft-delete a comment. Author or admin-unrestricted.
+
+Arguments:
+
+```json
+{
+  "id": "01HX...",
+  "on_behalf_of": "01HX..."
+}
+```
+
+Reversible via `restore_comment`.
+
+### restore_comment
+
+Restore a soft-deleted comment. Author or admin-unrestricted.
+
+Arguments:
+
+```json
+{
+  "id": "01HX...",
+  "on_behalf_of": "01HX..."
+}
+```
 
 ### watch
 
@@ -386,6 +649,50 @@ Returns:
 ```
 
 A typical agent heartbeat looks like: call `read_events` with the last-known cursor, process the batch, then call `ack_events` with the highest sequence number from the batch. The cursor survives across MCP sessions; the subscription itself owns it.
+
+### get_subscription
+
+Read one subscription by id. Returns full details including `webhook_url`, but never the `webhook_secret` (which is only ever shown in the `watch` response at creation time).
+
+Arguments:
+
+```json
+{
+  "id": "01HX...",
+  "on_behalf_of": "01HX..."
+}
+```
+
+### list_subscriptions
+
+List subscriptions visible to the caller. Normally returns only your own; admin-unrestricted sees all. Useful for finding subscription ids and for inspecting what is currently being watched.
+
+Arguments:
+
+```json
+{
+  "where": {"resource": "tickets"},
+  "limit": 50,
+  "on_behalf_of": "01HX..."
+}
+```
+
+All optional. Filterable fields include `id`, `api_key_id`, `name`, `resource`, `max_fires`, `fire_count`, `expires_at`, `created_at`, `updated_at`.
+
+### list_deliveries
+
+List recent webhook delivery attempts for a specific subscription, with status codes, error messages, and retry scheduling. This is the right tool when push notifications are not arriving and you need to debug why. Readable by the subscription's owner or by admin-unrestricted.
+
+Arguments:
+
+```json
+{
+  "id": "01HX...",
+  "on_behalf_of": "01HX..."
+}
+```
+
+Returns the most recent 50 deliveries, newest first. Each row shows `state` (pending, retrying, delivered, failed), `attempts`, `last_status_code`, `last_error`, and `next_retry_at`. A `state` of `retrying` with a future `next_retry_at` means the worker will try again on its own; `failed` means the retry budget was exhausted and the event can now only be picked up through `read_events`.
 
 ## Subscription lifecycle patterns
 

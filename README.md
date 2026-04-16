@@ -319,30 +319,58 @@ For example, if your agent receives a Telegram message from Alice and needs to c
 
 #### Tools
 
-There are fifteen tools, small enough to keep the agent's system prompt lean while still covering the full day-to-day surface. Administrative work like creating teams, creating users, and issuing API keys is intentionally not here; operators do that directly through the REST API or using the recipes in [docs/operators.md](docs/operators.md).
+tasks127 is headless and has no human-facing UI. That means the agent is the only path the operator has into the system, and the MCP tool set has to be comprehensive enough for the agent to do everything the operator would otherwise do through a dashboard. This is a deliberate departure from the usual MCP guidance to keep tool counts small. The tradeoff is real (larger tool sets measurably consume context and can degrade agent accuracy), but the alternative here would be an agent that cannot set itself up.
+
+The one administrative area still reserved for the operator is API key management. Minting new admin keys has enough blast radius that keeping it out of the MCP surface is worth a small amount of setup friction. See [docs/operators.md](docs/operators.md) for the curl recipes.
 
 ```
-whoami             return the effective identity (tier, user, on-behalf-of)
-list_teams         list teams visible to the caller
-list_projects      list projects, optionally filtered by team
-search_users       find users by name or email substring
+whoami              return the effective identity (tier, user, on-behalf-of)
+list_teams          list teams visible to the caller
+list_projects       list projects, optionally filtered by team
+search_users        find users by name or email substring
+list_team_members   list memberships, optionally filtered to one team
 
-create_ticket      create a ticket; team and project accept ULIDs or 3-letter keys
-get_ticket         read one ticket by ULID or display ID (FOO-14)
-search_tickets     filter tickets using the Mongo-style DSL
-update_tickets     patch one ticket (by id) or many (by filter) in one call
-delete_tickets     soft-delete one ticket (by id) or many (by filter)
+create_user         create a new user (admin only)
+update_user         update a user's name or email
+delete_user         soft-delete a user
+restore_user        undo a user deletion
 
-add_comment        add a comment to a ticket
-list_comments      read comments on a ticket
+create_team         create a team with a 3-letter key
+update_team         rename a team (key is immutable)
+delete_team         soft-delete a team
+restore_team        undo a team deletion
 
-watch              register a subscription (filter + event types)
-unwatch            cancel a subscription
-read_events        drain pending events from a subscription's inbox
-ack_events         advance the cursor after processing a batch
+create_project      create a project within a team
+update_project      rename a project
+delete_project      soft-delete a project
+restore_project     undo a project deletion
+
+add_team_member     add a user to a team
+remove_team_member  remove a user from a team
+
+create_ticket       create a ticket; team and project accept ULIDs or 3-letter keys
+get_ticket          read one ticket by ULID or display ID (FOO-14)
+search_tickets      filter tickets using the Mongo-style DSL
+update_tickets      patch one ticket (by id) or many (by filter) in one call
+delete_tickets      soft-delete one ticket (by id) or many (by filter)
+restore_ticket      undo a ticket deletion
+
+add_comment         add a comment to a ticket
+list_comments       read comments on a ticket, chronological by default
+edit_comment        change a comment's body (author or admin)
+delete_comment      soft-delete a comment (author or admin)
+restore_comment     undo a comment deletion
+
+watch               register a subscription (filter + event types)
+unwatch             cancel a subscription
+read_events         drain pending events from a subscription's inbox
+ack_events          advance the cursor after processing a batch
+get_subscription    read one subscription by id
+list_subscriptions  list the caller's subscriptions
+list_deliveries     list recent webhook delivery attempts with status codes
 ```
 
-The tool count is deliberately bounded. Current guidance is that oversized MCP tool sets measurably degrade agent accuracy and consume significant context budget, so this surface errs toward fewer, workflow-shaped tools rather than one-to-one coverage of the REST endpoints.
+That is 37 tools. Several accept either a single id or a filter so that the single-item and bulk shapes collapse into one tool (notably `update_tickets` and `delete_tickets`), which helps a little. Over time, as models improve at handling larger tool sets, the tradeoff gets easier.
 
 ### Audit log
 
