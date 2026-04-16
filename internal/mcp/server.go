@@ -110,7 +110,9 @@ func registerTools(s *sdk.Server, c *Client) {
 
 	sdk.AddTool(s, &sdk.Tool{
 		Name: "list_comments",
-		Description: "List comments on a specific ticket. ticket accepts ULID or display ID.",
+		Description: "List comments on a specific ticket. ticket accepts ULID or display ID. " +
+			"Defaults to chronological order (oldest first), which is the natural reading order " +
+			"for a discussion. Pass order_by to override.",
 	}, toolListComments(c))
 
 	// --- subscriptions ---------------------------------------------------------
@@ -438,6 +440,7 @@ func toolAddComment(c *Client) sdk.ToolHandlerFor[addCommentArgs, any] {
 type listCommentsArgs struct {
 	Ticket     string `json:"ticket" jsonschema:"ticket id or display ID"`
 	Limit      int    `json:"limit,omitempty"`
+	OrderBy    []any  `json:"order_by,omitempty" jsonschema:"optional sort override; defaults to created_at ASC (oldest first) for natural reading order"`
 	OnBehalfOf string `json:"on_behalf_of,omitempty"`
 }
 
@@ -454,6 +457,14 @@ func toolListComments(c *Client) sdk.ToolHandlerFor[listCommentsArgs, any] {
 		}
 		body := map[string]any{
 			"where": map[string]any{"ticket_id": ticket.ID},
+		}
+		// Default to chronological order so the agent reads the discussion
+		// oldest-first. The REST search default is created_at DESC which is
+		// the wrong direction for "read what was said" workflows.
+		if len(a.OrderBy) > 0 {
+			body["order_by"] = a.OrderBy
+		} else {
+			body["order_by"] = []any{map[string]any{"field": "created_at", "dir": "asc"}}
 		}
 		if a.Limit > 0 {
 			body["limit"] = a.Limit

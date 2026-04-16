@@ -270,7 +270,7 @@ Returns the created comment row.
 
 ### list_comments
 
-List comments on a specific ticket.
+List comments on a specific ticket. Comments are returned in chronological order (oldest first) by default, which is the natural reading order for a discussion. Pass `order_by` to override, for example if you want only the most recent comments.
 
 Arguments:
 
@@ -278,9 +278,12 @@ Arguments:
 {
   "ticket": "BAK-1",
   "limit": 50,
+  "order_by": [{"field": "created_at", "dir": "desc"}],
   "on_behalf_of": "01HX..."
 }
 ```
+
+`order_by` is optional. When omitted the tool injects `[{"field": "created_at", "dir": "asc"}]` automatically. This differs from the REST `/v1/comments/search` default (created_at DESC), because the agent-facing reading order is usually the reverse of the REST search default.
 
 Returns a search envelope of comment rows.
 

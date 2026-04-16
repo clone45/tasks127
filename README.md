@@ -211,7 +211,7 @@ curl -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"
 
 If your agent can receive HTTP, add a `webhook_url` to the subscription and the server will push events to it. The URL host must either be a loopback address (`localhost`, `127.0.0.1`, `::1`, or anything that parses as a loopback IP), or a hostname you have explicitly allowed by setting `TASKS127_WEBHOOK_ALLOWED_HOSTS` to a comma-separated list when starting the server. The check is purely lexical on the URL; no DNS is resolved. This second knob exists specifically for containerized deployments where the webhook target is a sibling service on a Docker network, for example a bridge service reachable at `http://r1n-bridge:8080/events`. You would run tasks127 with `TASKS127_WEBHOOK_ALLOWED_HOSTS=r1n-bridge` and that one hostname would be accepted while everything else stayed rejected.
 
-The create response includes a `webhook_secret` exactly once; store it somewhere safe. Verify the HMAC SHA-256 signature on incoming deliveries, which is sent in the `X-Tasks127-Signature` header. The signed value is the timestamp, a literal period, and the request body, all concatenated.
+The create response includes a `webhook_secret` exactly once; store it somewhere safe. Verify the HMAC SHA-256 signature on incoming deliveries, which is sent in the `X-Tasks127-Signature` header. The header value is the literal prefix `sha256=` followed by the hex-encoded digest of `HMAC-SHA256(webhook_secret, timestamp + "." + raw_body)`, where `timestamp` is the value of the accompanying `X-Tasks127-Timestamp` header. See [docs/api.md](docs/api.md#webhook-delivery-format) for the full delivery format including retry semantics.
 
 The server retries failed deliveries with exponential backoff up to six attempts (30s, 2m, 10m, 1h, 4h, give up). If every attempt fails, the event is still sitting in the inbox waiting for your next heartbeat. The inbox is the source of truth. Webhooks are a fast-path optimization on top.
 
@@ -225,7 +225,7 @@ By default the server speaks MCP over stdin and stdout, which is how most MCP cl
 
 #### Configuring an MCP client
 
-For stdio-based clients like Claude Desktop, add an entry to your MCP configuration pointing at the tasks127 binary.
+Most MCP clients share the same configuration shape: an object keyed on a server name, with `command`, `args`, and `env` underneath. The file location varies per client (Claude Desktop, Claude Code, OpenClaw, Cursor, and Zed each have their own), but the entry you drop in is essentially the same. The example below works as-is for Claude Desktop and Claude Code; OpenClaw uses the same shape in `~/.openclaw/openclaw.json` with an optional `"type": "stdio"` you can add for clarity.
 
 ```json
 {
