@@ -1,0 +1,27 @@
+# Compiled binary (the `go build -o tasks127 ./cmd/tasks127` output)
+/tasks127
+/cmd/tasks127/tasks127
+
+# SQLite database files created at runtime
+*.db
+*.db-shm
+*.db-wal
+
+# Internal planning notes, kept locally but not part of the public repo
+docs/planning/
+
+# Editor and OS artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Go build / test artifacts
+/bin/
+/dist/
+*.test
+*.out
+coverage.html
