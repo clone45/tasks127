@@ -215,6 +215,12 @@ The create response includes a `webhook_secret` exactly once; store it somewhere
 
 The server retries failed deliveries with exponential backoff up to six attempts (30s, 2m, 10m, 1h, 4h, give up). If every attempt fails, the event is still sitting in the inbox waiting for your next heartbeat. The inbox is the source of truth. Webhooks are a fast-path optimization on top.
 
+#### Receiver patterns
+
+The `webhook_secret` returned from a subscription-creating call is shown exactly once. Your receiver needs that secret on every subsequent delivery to verify the HMAC, so the receiver has to persist it somewhere stable. Storing the secret only in agent memory is an antipattern: subscriptions outlive any single agent process, and if the agent restarts the receiver still needs the secret to validate incoming requests.
+
+The common shape is: immediately after the agent creates a subscription, it hands the subscription ID, the URL, and the secret to the receiver over a private channel. The receiver stores the mapping from subscription ID to secret. When a delivery arrives, the receiver reads the `X-Tasks127-Subscription-Id` header, looks up the corresponding secret, and uses it to verify the signature. If you are running the receiver and the agent in the same process or the same container, "private channel" might just be an internal function call. If they are separate services, it is a small authenticated HTTP endpoint on the receiver side, or a shared secret store like a local SQLite file or a short-lived configuration secret.
+
 ### MCP server for AI agents
 
 Running `tasks127 mcp` starts a Model Context Protocol server that wraps the REST API as tools an AI agent can call directly. This is the intended integration path for agent-based clients like OpenClaw, Claude Desktop, or Claude Code. Under the hood it is a thin translation layer that makes HTTP calls back to the running REST server, so everything the REST API enforces (auth, visibility, audit, subscription firing) applies without exception.
@@ -241,6 +247,10 @@ Most MCP clients share the same configuration shape: an object keyed on a server
   }
 }
 ```
+
+The `env` block above is not optional, and this is the single most common thing to trip over. When an MCP client spawns the tasks127 binary over stdio, it does not pass its own environment through to the child process. The official MCP SDKs restrict inheritance to a small set of basic variables (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER` on Linux) and nothing else. `TASKS127_URL` and `TASKS127_API_KEY` have to be named explicitly inside `env`, or the child will not see them. Most MCP clients support `${VAR}` interpolation inside these values, which is the right shape when you want to pull runtime values in from a container's environment rather than hardcoding them.
+
+If the `env` block is missing or misconfigured, the child process logs `tasks127 mcp: TASKS127_API_KEY is required` to stderr and exits. The client typically surfaces this as a generic "server failed to start" without showing the stderr message, so the failure mode is quieter than it should be.
 
 For HTTP-based clients, run the MCP server as a separate long-lived process and point the client at it.
 
