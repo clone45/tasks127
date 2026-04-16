@@ -19,6 +19,13 @@ import (
 )
 
 func main() {
+	// Subcommand dispatch. `tasks127` alone still starts the REST server;
+	// `tasks127 mcp [flags]` runs the MCP adapter.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		runMCP(os.Args[2:])
+		return
+	}
+
 	cfg := config.Load()
 
 	database, err := db.Open(cfg.DatabaseURL)

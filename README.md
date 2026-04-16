@@ -205,6 +205,16 @@ If your agent can receive HTTP, add a `webhook_url` to the subscription and the 
 
 The server retries failed deliveries with exponential backoff up to six attempts (30s, 2m, 10m, 1h, 4h, give up). If every attempt fails, the event is still sitting in the inbox waiting for your next heartbeat. The inbox is the source of truth. Webhooks are a fast-path optimization on top.
 
+### MCP server for AI agents
+
+Running `tasks127 mcp` starts a Model Context Protocol server that wraps the REST API as tools an AI agent can call directly. This is the intended integration path for agent-based clients like OpenClaw, Claude Desktop, or Claude Code. Under the hood it is a thin translation layer that makes HTTP calls back to the running REST server, so everything the REST API enforces (auth, visibility, audit, subscription firing) applies without exception.
+
+The MCP server needs two environment variables. `TASKS127_URL` points at the REST server and defaults to `http://127.0.0.1:8080`. `TASKS127_API_KEY` is the bearer token the MCP server will use on your agent's behalf. Typically the agent holds an admin key and uses the `X-On-Behalf-Of` header pattern to scope individual requests to specific users, though that particular mechanism is exposed through the REST layer rather than through MCP tools directly.
+
+By default the server speaks MCP over stdin and stdout, which is how most MCP clients spawn it. Pass `--http 127.0.0.1:8090` to speak Streamable HTTP on a local port instead, which is useful when multiple clients want to share one long-running MCP process, or for debugging with curl.
+
+The tool surface is deliberately small, about fifteen tools covering the common agent workflows: identity, team and project discovery, user search, the ticket lifecycle, comments, and subscriptions. This is an intentional choice informed by current guidance that large tool sets measurably degrade agent accuracy and burn context. Setup operations like creating teams, creating users, and issuing API keys are not exposed through MCP; those should be done through the REST API directly by the human operator.
+
 ### Audit log
 
 Every mutation is recorded in an internal `audit_log` table. There is no API for querying it yet. For now, if something goes wrong and you need to reconstruct what happened, query the database directly. An API for audit inspection is an obvious future addition.
