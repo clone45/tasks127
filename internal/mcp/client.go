@@ -51,9 +51,30 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("tasks127 API error (%d): %s", e.StatusCode, e.Message)
 }
 
+// CallOption tweaks a single REST call. The options-pattern lets us add
+// new per-call knobs without growing the method signatures.
+type CallOption func(*callOpts)
+
+type callOpts struct {
+	onBehalfOf string
+}
+
+// WithOnBehalfOf sets the X-On-Behalf-Of header on the underlying REST call,
+// which tells tasks127 to scope this request as if it were made by the given
+// user. Only admin-tier API keys can use this; user-tier keys will get a 400.
+// The MCP tools accept this via an on_behalf_of argument.
+func WithOnBehalfOf(userID string) CallOption {
+	return func(o *callOpts) { o.onBehalfOf = userID }
+}
+
 // do makes an HTTP request and decodes the JSON response into out if provided.
 // On non-2xx it returns an *APIError with the server-provided code/message.
-func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+func (c *Client) do(ctx context.Context, method, path string, body any, out any, opts ...CallOption) error {
+	var co callOpts
+	for _, opt := range opts {
+		opt(&co)
+	}
+
 	var bodyReader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -70,6 +91,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if co.onBehalfOf != "" {
+		req.Header.Set("X-On-Behalf-Of", co.onBehalfOf)
 	}
 
 	resp, err := c.HTTP.Do(req)
@@ -104,22 +128,33 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	return nil
 }
 
-// get/post/patch/delete shorthands used by the tool handlers.
+// get/post/patch/delete shorthands used by the tool handlers. Each accepts
+// optional CallOptions (currently WithOnBehalfOf) to scope the request.
 
-func (c *Client) get(ctx context.Context, path string, out any) error {
-	return c.do(ctx, http.MethodGet, path, nil, out)
+func (c *Client) get(ctx context.Context, path string, out any, opts ...CallOption) error {
+	return c.do(ctx, http.MethodGet, path, nil, out, opts...)
 }
 
-func (c *Client) post(ctx context.Context, path string, body, out any) error {
-	return c.do(ctx, http.MethodPost, path, body, out)
+func (c *Client) post(ctx context.Context, path string, body, out any, opts ...CallOption) error {
+	return c.do(ctx, http.MethodPost, path, body, out, opts...)
 }
 
-func (c *Client) patch(ctx context.Context, path string, body, out any) error {
-	return c.do(ctx, http.MethodPatch, path, body, out)
+func (c *Client) patch(ctx context.Context, path string, body, out any, opts ...CallOption) error {
+	return c.do(ctx, http.MethodPatch, path, body, out, opts...)
 }
 
-func (c *Client) deleteReq(ctx context.Context, path string, body, out any) error {
-	return c.do(ctx, http.MethodDelete, path, body, out)
+func (c *Client) deleteReq(ctx context.Context, path string, body, out any, opts ...CallOption) error {
+	return c.do(ctx, http.MethodDelete, path, body, out, opts...)
+}
+
+// oboOpts is a small helper: given an on-behalf-of string, returns either
+// a one-element option slice or an empty one, for passing through to the
+// client methods without conditional branching at every call site.
+func oboOpts(onBehalfOf string) []CallOption {
+	if onBehalfOf == "" {
+		return nil
+	}
+	return []CallOption{WithOnBehalfOf(onBehalfOf)}
 }
 
 // --- small utilities used by tool handlers ---
@@ -138,8 +173,9 @@ func isThreeLetterKey(s string) bool {
 }
 
 // resolveTeamID accepts either a ULID or a 3-letter team key and returns
-// the team's ULID. If the input is already a ULID, it is returned unchanged.
-func (c *Client) resolveTeamID(ctx context.Context, idOrKey string) (string, error) {
+// the team's ULID. The lookup runs with the same options (e.g. OBO) as the
+// outer request so visibility is consistent.
+func (c *Client) resolveTeamID(ctx context.Context, idOrKey string, opts ...CallOption) (string, error) {
 	if !isThreeLetterKey(idOrKey) {
 		return idOrKey, nil
 	}
@@ -151,7 +187,7 @@ func (c *Client) resolveTeamID(ctx context.Context, idOrKey string) (string, err
 	err := c.post(ctx, "/v1/teams/search", map[string]any{
 		"where": map[string]any{"key": idOrKey},
 		"limit": 1,
-	}, &out)
+	}, &out, opts...)
 	if err != nil {
 		return "", fmt.Errorf("resolve team key %q: %w", idOrKey, err)
 	}
@@ -162,7 +198,7 @@ func (c *Client) resolveTeamID(ctx context.Context, idOrKey string) (string, err
 }
 
 // resolveProjectID accepts a ULID or a 3-letter project key.
-func (c *Client) resolveProjectID(ctx context.Context, idOrKey string) (string, error) {
+func (c *Client) resolveProjectID(ctx context.Context, idOrKey string, opts ...CallOption) (string, error) {
 	if !isThreeLetterKey(idOrKey) {
 		return idOrKey, nil
 	}
@@ -174,7 +210,7 @@ func (c *Client) resolveProjectID(ctx context.Context, idOrKey string) (string, 
 	err := c.post(ctx, "/v1/projects/search", map[string]any{
 		"where": map[string]any{"key": idOrKey},
 		"limit": 1,
-	}, &out)
+	}, &out, opts...)
 	if err != nil {
 		return "", fmt.Errorf("resolve project key %q: %w", idOrKey, err)
 	}

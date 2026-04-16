@@ -55,6 +55,17 @@ curl -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
   $A/v1/team-members
 ```
 
+### If you lose the admin key before you have real data
+
+In development, the easiest recovery is to stop the server, delete the SQLite file, and start over. A fresh boot generates and prints a new admin key just like the first one. This only works as a recovery path while the database is disposable. Once you have tickets you care about, issue a second admin key ahead of time and keep it safe, because the file-delete trick will nuke everything.
+
+```bash
+# Development only. Wipes everything, including users, tickets, subscriptions, and audit log.
+rm tasks127.db tasks127.db-wal tasks127.db-shm
+./tasks127
+# Copy the new ADMIN API KEY from stdout.
+```
+
 ## Managing API keys
 
 Every request to tasks127 carries a bearer token. How you issue, scope, and revoke those tokens is the core of the authorization story.
@@ -199,7 +210,7 @@ The response tells you your tier, your user id if you hold a user-tier key, and 
 
 ### Why isn't my webhook firing?
 
-Subscriptions with a webhook URL have a delivery history endpoint that shows recent attempts, their HTTP status codes, and any error messages. This is the right place to look when push notifications are not arriving.
+Subscriptions with a webhook URL have a delivery history endpoint that shows recent attempts, their HTTP status codes, and any error messages. This is the right place to look when push notifications are not arriving. The endpoint is readable by two groups: admin-unrestricted callers (useful for you as the operator debugging any subscription on the system) and the owner of the subscription itself (useful for the agent or user checking their own subscriptions). User-tier callers cannot see other users' deliveries.
 
 ```bash
 SUB_ID='01...'

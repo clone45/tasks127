@@ -78,13 +78,21 @@ That is the whole shape of the system. Everything else follows the same pattern.
 tasks127 reads its configuration from environment variables, all of which have reasonable defaults.
 
 ```
-TASKS127_BIND              default 127.0.0.1:8080
-TASKS127_DATABASE_URL      default sqlite://./tasks127.db
-TASKS127_LOG_LEVEL         default info
-TASKS127_MIGRATE_ON_START  default true
+# REST server
+TASKS127_BIND                       default 127.0.0.1:8080
+TASKS127_DATABASE_URL               default sqlite://./tasks127.db
+TASKS127_LOG_LEVEL                  default info
+TASKS127_MIGRATE_ON_START           default true
+TASKS127_WEBHOOK_ALLOWED_HOSTS      default empty (loopback only; see webhooks section)
+
+# MCP server (only read by the `tasks127 mcp` subcommand)
+TASKS127_URL                        default http://127.0.0.1:8080
+TASKS127_API_KEY                    required, no default
 ```
 
 If you want the server reachable from outside localhost, set `TASKS127_BIND` to an external address. You will almost certainly want a TLS terminator like Caddy or nginx in front of it, since tasks127 does not do TLS on its own.
+
+There is also a `GET /healthz` endpoint that requires no authentication and returns `{"status":"ok"}`. It is the right thing to point a Docker healthcheck or uptime monitor at.
 
 ## Key concepts
 
@@ -201,7 +209,9 @@ curl -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"
   http://127.0.0.1:8080/v1/subscriptions/<id>/ack
 ```
 
-If your agent can receive HTTP, add a `webhook_url` to the subscription and the server will push events to it. The URL has to point at localhost in the default build. If your agent is running on a different machine, the subscription will be rejected at create time with a clear error; support for external webhook URLs with the corresponding SSRF defenses is a future addition. The create response will include a `webhook_secret` exactly once, and you should store it somewhere safe. Verify the HMAC SHA-256 signature on incoming deliveries, which is sent in the `X-Tasks127-Signature` header. The signed value is the timestamp, a literal period, and the request body, all concatenated.
+If your agent can receive HTTP, add a `webhook_url` to the subscription and the server will push events to it. The URL host must either be a loopback address (`localhost`, `127.0.0.1`, `::1`, or anything that parses as a loopback IP), or a hostname you have explicitly allowed by setting `TASKS127_WEBHOOK_ALLOWED_HOSTS` to a comma-separated list when starting the server. The check is purely lexical on the URL; no DNS is resolved. This second knob exists specifically for containerized deployments where the webhook target is a sibling service on a Docker network, for example a bridge service reachable at `http://r1n-bridge:8080/events`. You would run tasks127 with `TASKS127_WEBHOOK_ALLOWED_HOSTS=r1n-bridge` and that one hostname would be accepted while everything else stayed rejected.
+
+The create response includes a `webhook_secret` exactly once; store it somewhere safe. Verify the HMAC SHA-256 signature on incoming deliveries, which is sent in the `X-Tasks127-Signature` header. The signed value is the timestamp, a literal period, and the request body, all concatenated.
 
 The server retries failed deliveries with exponential backoff up to six attempts (30s, 2m, 10m, 1h, 4h, give up). If every attempt fails, the event is still sitting in the inbox waiting for your next heartbeat. The inbox is the source of truth. Webhooks are a fast-path optimization on top.
 
@@ -209,11 +219,71 @@ The server retries failed deliveries with exponential backoff up to six attempts
 
 Running `tasks127 mcp` starts a Model Context Protocol server that wraps the REST API as tools an AI agent can call directly. This is the intended integration path for agent-based clients like OpenClaw, Claude Desktop, or Claude Code. Under the hood it is a thin translation layer that makes HTTP calls back to the running REST server, so everything the REST API enforces (auth, visibility, audit, subscription firing) applies without exception.
 
-The MCP server needs two environment variables. `TASKS127_URL` points at the REST server and defaults to `http://127.0.0.1:8080`. `TASKS127_API_KEY` is the bearer token the MCP server will use on your agent's behalf. Typically the agent holds an admin key and uses the `X-On-Behalf-Of` header pattern to scope individual requests to specific users, though that particular mechanism is exposed through the REST layer rather than through MCP tools directly.
+The MCP server needs two environment variables. `TASKS127_URL` points at the REST server and defaults to `http://127.0.0.1:8080`. `TASKS127_API_KEY` is the bearer token the MCP server will use when calling back into the REST API. The typical deployment is that the MCP server holds an admin key and individual tool calls scope themselves to specific users via an `on_behalf_of` argument (see below).
 
 By default the server speaks MCP over stdin and stdout, which is how most MCP clients spawn it. Pass `--http 127.0.0.1:8090` to speak Streamable HTTP on a local port instead, which is useful when multiple clients want to share one long-running MCP process, or for debugging with curl.
 
-The tool surface is deliberately small, about fifteen tools covering the common agent workflows: identity, team and project discovery, user search, the ticket lifecycle, comments, and subscriptions. This is an intentional choice informed by current guidance that large tool sets measurably degrade agent accuracy and burn context. Setup operations like creating teams, creating users, and issuing API keys are not exposed through MCP; those should be done through the REST API directly by the human operator.
+#### Configuring an MCP client
+
+For stdio-based clients like Claude Desktop, add an entry to your MCP configuration pointing at the tasks127 binary.
+
+```json
+{
+  "mcpServers": {
+    "tasks127": {
+      "command": "/usr/local/bin/tasks127",
+      "args": ["mcp"],
+      "env": {
+        "TASKS127_URL": "http://127.0.0.1:8080",
+        "TASKS127_API_KEY": "t127_..."
+      }
+    }
+  }
+}
+```
+
+For HTTP-based clients, run the MCP server as a separate long-lived process and point the client at it.
+
+```bash
+TASKS127_URL="http://127.0.0.1:8080" \
+TASKS127_API_KEY="t127_..." \
+  /usr/local/bin/tasks127 mcp --http 127.0.0.1:8090
+```
+
+Clients then connect to `http://127.0.0.1:8090/mcp` for the Streamable HTTP endpoint. The server also serves a `/healthz` on the MCP port for process supervision.
+
+#### Acting on behalf of a user
+
+The MCP tools accept an optional `on_behalf_of` argument on every operation where visibility or authorship matters. When set, the tool sends an `X-On-Behalf-Of` header with the REST call, which scopes the request to that user's visibility and capabilities. This is how a single MCP process with one admin API key can serve many different users, each call correctly scoped.
+
+For example, if your agent receives a Telegram message from Alice and needs to create a ticket she should own, the tool call looks like `create_ticket` with `team: "ENG", title: "...", on_behalf_of: "<alice's user_id>"`. The ticket gets created as if Alice herself called the REST API. Only admin-tier keys can use this; user-tier keys that try will get a 400 back.
+
+#### Tools
+
+There are fifteen tools, small enough to keep the agent's system prompt lean while still covering the full day-to-day surface. Administrative work like creating teams, creating users, and issuing API keys is intentionally not here; operators do that directly through the REST API or using the recipes in [docs/operators.md](docs/operators.md).
+
+```
+whoami             return the effective identity (tier, user, on-behalf-of)
+list_teams         list teams visible to the caller
+list_projects      list projects, optionally filtered by team
+search_users       find users by name or email substring
+
+create_ticket      create a ticket; team and project accept ULIDs or 3-letter keys
+get_ticket         read one ticket by ULID or display ID (FOO-14)
+search_tickets     filter tickets using the Mongo-style DSL
+update_tickets     patch one ticket (by id) or many (by filter) in one call
+delete_tickets     soft-delete one ticket (by id) or many (by filter)
+
+add_comment        add a comment to a ticket
+list_comments      read comments on a ticket
+
+watch              register a subscription (filter + event types)
+unwatch            cancel a subscription
+read_events        drain pending events from a subscription's inbox
+ack_events         advance the cursor after processing a batch
+```
+
+The tool count is deliberately bounded. Current guidance is that oversized MCP tool sets measurably degrade agent accuracy and consume significant context budget, so this surface errs toward fewer, workflow-shaped tools rather than one-to-one coverage of the REST endpoints.
 
 ### Audit log
 

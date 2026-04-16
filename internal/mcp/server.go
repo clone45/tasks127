@@ -153,12 +153,14 @@ func registerTools(s *sdk.Server, c *Client) {
 // containing pretty-printed JSON. Errors (including APIError) propagate
 // unchanged; the SDK will convert them into an MCP tool-error response.
 
-type noArgs struct{}
+type whoamiArgs struct {
+	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to check the effective identity for; useful to verify on-behalf-of scoping works"`
+}
 
-func toolWhoami(c *Client) sdk.ToolHandlerFor[noArgs, any] {
-	return func(ctx context.Context, _ *sdk.CallToolRequest, _ noArgs) (*sdk.CallToolResult, any, error) {
+func toolWhoami(c *Client) sdk.ToolHandlerFor[whoamiArgs, any] {
+	return func(ctx context.Context, _ *sdk.CallToolRequest, a whoamiArgs) (*sdk.CallToolResult, any, error) {
 		var out any
-		if err := c.get(ctx, "/v1/whoami", &out); err != nil {
+		if err := c.get(ctx, "/v1/whoami", &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -166,7 +168,8 @@ func toolWhoami(c *Client) sdk.ToolHandlerFor[noArgs, any] {
 }
 
 type listTeamsArgs struct {
-	Limit int `json:"limit,omitempty" jsonschema:"maximum teams to return (default 50, max 200)"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"maximum teams to return (default 50, max 200)"`
+	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to scope the list to what that user can see"`
 }
 
 func toolListTeams(c *Client) sdk.ToolHandlerFor[listTeamsArgs, any] {
@@ -176,7 +179,7 @@ func toolListTeams(c *Client) sdk.ToolHandlerFor[listTeamsArgs, any] {
 			body["limit"] = a.Limit
 		}
 		var out any
-		if err := c.post(ctx, "/v1/teams/search", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/teams/search", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -184,8 +187,9 @@ func toolListTeams(c *Client) sdk.ToolHandlerFor[listTeamsArgs, any] {
 }
 
 type listProjectsArgs struct {
-	Team  string `json:"team,omitempty" jsonschema:"optional team_id (ULID) or three-letter key to filter to one team's projects"`
-	Limit int    `json:"limit,omitempty" jsonschema:"maximum projects to return"`
+	Team       string `json:"team,omitempty" jsonschema:"optional team_id (ULID) or three-letter key to filter to one team's projects"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"maximum projects to return"`
+	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to scope to what that user can see"`
 }
 
 func toolListProjects(c *Client) sdk.ToolHandlerFor[listProjectsArgs, any] {
@@ -202,7 +206,7 @@ func toolListProjects(c *Client) sdk.ToolHandlerFor[listProjectsArgs, any] {
 			body["limit"] = a.Limit
 		}
 		var out any
-		if err := c.post(ctx, "/v1/projects/search", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/projects/search", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -210,8 +214,9 @@ func toolListProjects(c *Client) sdk.ToolHandlerFor[listProjectsArgs, any] {
 }
 
 type searchUsersArgs struct {
-	Contains string `json:"contains,omitempty" jsonschema:"substring to match against name or email (case-insensitive)"`
-	Limit    int    `json:"limit,omitempty"`
+	Contains   string `json:"contains,omitempty" jsonschema:"substring to match against name or email (case-insensitive)"`
+	Limit      int    `json:"limit,omitempty"`
+	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to scope visibility"`
 }
 
 func toolSearchUsers(c *Client) sdk.ToolHandlerFor[searchUsersArgs, any] {
@@ -230,7 +235,7 @@ func toolSearchUsers(c *Client) sdk.ToolHandlerFor[searchUsersArgs, any] {
 			body["limit"] = a.Limit
 		}
 		var out any
-		if err := c.post(ctx, "/v1/users/search", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/users/search", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -245,6 +250,7 @@ type createTicketArgs struct {
 	Parent         string  `json:"parent,omitempty" jsonschema:"optional parent ticket id or display ID (e.g. FOO-14); makes this a sub-ticket"`
 	Status         string  `json:"status,omitempty" jsonschema:"one of: open, in_progress, blocked, done, canceled (default: open)"`
 	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
+	OnBehalfOf     string  `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to create the ticket as; see tool descriptions"`
 }
 
 func toolCreateTicket(c *Client) sdk.ToolHandlerFor[createTicketArgs, any] {
@@ -252,7 +258,8 @@ func toolCreateTicket(c *Client) sdk.ToolHandlerFor[createTicketArgs, any] {
 		if a.Team == "" || a.Title == "" {
 			return nil, nil, fmt.Errorf("team and title are required")
 		}
-		teamID, err := c.resolveTeamID(ctx, a.Team)
+		// Resolve keys using the ACTING principal's visibility, not admin's.
+		teamID, err := c.resolveTeamID(ctx, a.Team, oboOpts(a.OnBehalfOf)...)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -264,19 +271,17 @@ func toolCreateTicket(c *Client) sdk.ToolHandlerFor[createTicketArgs, any] {
 			body["description"] = a.Description
 		}
 		if a.Project != "" {
-			projectID, err := c.resolveProjectID(ctx, a.Project)
+			projectID, err := c.resolveProjectID(ctx, a.Project, oboOpts(a.OnBehalfOf)...)
 			if err != nil {
 				return nil, nil, err
 			}
 			body["project_id"] = projectID
 		}
 		if a.Parent != "" {
-			// Parent can be a display ID; the REST API resolves it for us on read,
-			// but the create payload needs a raw ticket id. We look it up first.
 			var parent struct {
 				ID string `json:"id"`
 			}
-			if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.Parent), &parent); err != nil {
+			if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.Parent), &parent, oboOpts(a.OnBehalfOf)...); err != nil {
 				return nil, nil, fmt.Errorf("resolve parent %q: %w", a.Parent, err)
 			}
 			body["parent_id"] = parent.ID
@@ -288,7 +293,7 @@ func toolCreateTicket(c *Client) sdk.ToolHandlerFor[createTicketArgs, any] {
 			body["assignee_user_id"] = *a.AssigneeUserID
 		}
 		var out any
-		if err := c.post(ctx, "/v1/tickets", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/tickets", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -296,7 +301,8 @@ func toolCreateTicket(c *Client) sdk.ToolHandlerFor[createTicketArgs, any] {
 }
 
 type getTicketArgs struct {
-	ID string `json:"id" jsonschema:"ticket id (ULID) or display ID like FOO-14"`
+	ID         string `json:"id" jsonschema:"ticket id (ULID) or display ID like FOO-14"`
+	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to scope visibility"`
 }
 
 func toolGetTicket(c *Client) sdk.ToolHandlerFor[getTicketArgs, any] {
@@ -305,7 +311,7 @@ func toolGetTicket(c *Client) sdk.ToolHandlerFor[getTicketArgs, any] {
 			return nil, nil, fmt.Errorf("id is required")
 		}
 		var out any
-		if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.ID), &out); err != nil {
+		if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.ID), &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -313,9 +319,10 @@ func toolGetTicket(c *Client) sdk.ToolHandlerFor[getTicketArgs, any] {
 }
 
 type searchTicketsArgs struct {
-	Where   map[string]any `json:"where,omitempty" jsonschema:"filter object; see tool description for operators"`
-	Limit   int            `json:"limit,omitempty" jsonschema:"max results (default 50, cap 200)"`
-	OrderBy []any          `json:"order_by,omitempty" jsonschema:"optional sort: array of {field, dir} objects where dir is asc or desc"`
+	Where      map[string]any `json:"where,omitempty" jsonschema:"filter object; see tool description for operators"`
+	Limit      int            `json:"limit,omitempty" jsonschema:"max results (default 50, cap 200)"`
+	OrderBy    []any          `json:"order_by,omitempty" jsonschema:"optional sort: array of {field, dir} objects where dir is asc or desc"`
+	OnBehalfOf string         `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to scope visibility"`
 }
 
 func toolSearchTickets(c *Client) sdk.ToolHandlerFor[searchTicketsArgs, any] {
@@ -331,7 +338,7 @@ func toolSearchTickets(c *Client) sdk.ToolHandlerFor[searchTicketsArgs, any] {
 			body["order_by"] = a.OrderBy
 		}
 		var out any
-		if err := c.post(ctx, "/v1/tickets/search", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/tickets/search", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -339,9 +346,10 @@ func toolSearchTickets(c *Client) sdk.ToolHandlerFor[searchTicketsArgs, any] {
 }
 
 type updateTicketsArgs struct {
-	Ticket  string         `json:"ticket,omitempty" jsonschema:"single ticket id or display ID; mutually exclusive with where"`
-	Where   map[string]any `json:"where,omitempty" jsonschema:"filter object for bulk update; mutually exclusive with ticket"`
-	Changes map[string]any `json:"changes" jsonschema:"fields to set; required"`
+	Ticket     string         `json:"ticket,omitempty" jsonschema:"single ticket id or display ID; mutually exclusive with where"`
+	Where      map[string]any `json:"where,omitempty" jsonschema:"filter object for bulk update; mutually exclusive with ticket"`
+	Changes    map[string]any `json:"changes" jsonschema:"fields to set; required"`
+	OnBehalfOf string         `json:"on_behalf_of,omitempty"`
 }
 
 func toolUpdateTickets(c *Client) sdk.ToolHandlerFor[updateTicketsArgs, any] {
@@ -354,14 +362,14 @@ func toolUpdateTickets(c *Client) sdk.ToolHandlerFor[updateTicketsArgs, any] {
 		}
 		var out any
 		if a.Ticket != "" {
-			if err := c.patch(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), a.Changes, &out); err != nil {
+			if err := c.patch(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), a.Changes, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 				return nil, nil, err
 			}
 		} else {
 			if err := c.patch(ctx, "/v1/tickets", map[string]any{
 				"where": a.Where,
 				"set":   a.Changes,
-			}, &out); err != nil {
+			}, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -370,8 +378,9 @@ func toolUpdateTickets(c *Client) sdk.ToolHandlerFor[updateTicketsArgs, any] {
 }
 
 type deleteTicketsArgs struct {
-	Ticket string         `json:"ticket,omitempty"`
-	Where  map[string]any `json:"where,omitempty"`
+	Ticket     string         `json:"ticket,omitempty"`
+	Where      map[string]any `json:"where,omitempty"`
+	OnBehalfOf string         `json:"on_behalf_of,omitempty"`
 }
 
 func toolDeleteTickets(c *Client) sdk.ToolHandlerFor[deleteTicketsArgs, any] {
@@ -381,11 +390,11 @@ func toolDeleteTickets(c *Client) sdk.ToolHandlerFor[deleteTicketsArgs, any] {
 		}
 		var out any
 		if a.Ticket != "" {
-			if err := c.deleteReq(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), nil, &out); err != nil {
+			if err := c.deleteReq(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), nil, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 				return nil, nil, err
 			}
 		} else {
-			if err := c.deleteReq(ctx, "/v1/tickets", map[string]any{"where": a.Where}, &out); err != nil {
+			if err := c.deleteReq(ctx, "/v1/tickets", map[string]any{"where": a.Where}, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -396,7 +405,8 @@ func toolDeleteTickets(c *Client) sdk.ToolHandlerFor[deleteTicketsArgs, any] {
 type addCommentArgs struct {
 	Ticket       string `json:"ticket" jsonschema:"ticket id (ULID) or display ID"`
 	Body         string `json:"body" jsonschema:"comment text; required and must be non-empty"`
-	AuthorUserID string `json:"author_user_id,omitempty" jsonschema:"only needed when calling as unrestricted admin"`
+	AuthorUserID string `json:"author_user_id,omitempty" jsonschema:"only needed when calling as unrestricted admin without on_behalf_of"`
+	OnBehalfOf   string `json:"on_behalf_of,omitempty" jsonschema:"set to author the comment as this user; the REST API will record that user as author automatically"`
 }
 
 func toolAddComment(c *Client) sdk.ToolHandlerFor[addCommentArgs, any] {
@@ -404,11 +414,10 @@ func toolAddComment(c *Client) sdk.ToolHandlerFor[addCommentArgs, any] {
 		if a.Ticket == "" || a.Body == "" {
 			return nil, nil, fmt.Errorf("ticket and body are required")
 		}
-		// Resolve display ID to ticket ULID.
 		var ticket struct {
 			ID string `json:"id"`
 		}
-		if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), &ticket); err != nil {
+		if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), &ticket, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, fmt.Errorf("resolve ticket %q: %w", a.Ticket, err)
 		}
 		body := map[string]any{
@@ -419,7 +428,7 @@ func toolAddComment(c *Client) sdk.ToolHandlerFor[addCommentArgs, any] {
 			body["author_user_id"] = a.AuthorUserID
 		}
 		var out any
-		if err := c.post(ctx, "/v1/comments", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/comments", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -427,8 +436,9 @@ func toolAddComment(c *Client) sdk.ToolHandlerFor[addCommentArgs, any] {
 }
 
 type listCommentsArgs struct {
-	Ticket string `json:"ticket" jsonschema:"ticket id or display ID"`
-	Limit  int    `json:"limit,omitempty"`
+	Ticket     string `json:"ticket" jsonschema:"ticket id or display ID"`
+	Limit      int    `json:"limit,omitempty"`
+	OnBehalfOf string `json:"on_behalf_of,omitempty"`
 }
 
 func toolListComments(c *Client) sdk.ToolHandlerFor[listCommentsArgs, any] {
@@ -439,7 +449,7 @@ func toolListComments(c *Client) sdk.ToolHandlerFor[listCommentsArgs, any] {
 		var ticket struct {
 			ID string `json:"id"`
 		}
-		if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), &ticket); err != nil {
+		if err := c.get(ctx, "/v1/tickets/"+escapePathSeg(a.Ticket), &ticket, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, fmt.Errorf("resolve ticket %q: %w", a.Ticket, err)
 		}
 		body := map[string]any{
@@ -449,7 +459,7 @@ func toolListComments(c *Client) sdk.ToolHandlerFor[listCommentsArgs, any] {
 			body["limit"] = a.Limit
 		}
 		var out any
-		if err := c.post(ctx, "/v1/comments/search", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/comments/search", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil
@@ -463,7 +473,8 @@ type watchArgs struct {
 	Where      map[string]any `json:"where" jsonschema:"filter evaluated against each affected row"`
 	MaxFires   *int           `json:"max_fires,omitempty" jsonschema:"stop after N events (useful for one-time watches)"`
 	ExpiresAt  string         `json:"expires_at,omitempty" jsonschema:"RFC3339 cutoff; after this the subscription stops firing"`
-	WebhookURL string         `json:"webhook_url,omitempty" jsonschema:"localhost URL to push events to as they fire (optional)"`
+	WebhookURL string         `json:"webhook_url,omitempty" jsonschema:"URL to push events to as they fire. Must be loopback by default; operator can add hostnames via TASKS127_WEBHOOK_ALLOWED_HOSTS"`
+	OnBehalfOf string         `json:"on_behalf_of,omitempty" jsonschema:"scope the subscription to a specific user; only matching events visible to that user will fire"`
 }
 
 func toolWatch(c *Client) sdk.ToolHandlerFor[watchArgs, any] {
@@ -489,7 +500,7 @@ func toolWatch(c *Client) sdk.ToolHandlerFor[watchArgs, any] {
 			body["webhook_url"] = a.WebhookURL
 		}
 		var out any
-		if err := c.post(ctx, "/v1/subscriptions", body, &out); err != nil {
+		if err := c.post(ctx, "/v1/subscriptions", body, &out, oboOpts(a.OnBehalfOf)...); err != nil {
 			return nil, nil, err
 		}
 		return asJSON(out), nil, nil

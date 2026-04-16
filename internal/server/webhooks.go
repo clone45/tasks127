@@ -17,11 +17,32 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 )
+
+// extraAllowedWebhookHosts is loaded once from TASKS127_WEBHOOK_ALLOWED_HOSTS
+// and used to relax the default loopback-only webhook policy. Operators set
+// it to the hostnames of services that should receive webhooks, for example
+// sibling containers on a Docker network (`r1n-bridge,ticket-listener`).
+// Empty by default; localhost/127.0.0.1/::1 are always allowed regardless.
+var extraAllowedWebhookHosts = func() map[string]bool {
+	raw := os.Getenv("TASKS127_WEBHOOK_ALLOWED_HOSTS")
+	if raw == "" {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, h := range strings.Split(raw, ",") {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			out[h] = true
+		}
+	}
+	return out
+}()
 
 // Webhook delivery is additive to the inbox model: every match lands in
 // subscription_events unconditionally; if the subscription has a webhook_url,
@@ -45,9 +66,19 @@ var webhookBackoff = []time.Duration{
 	4 * time.Hour,
 }
 
-// allowedWebhookHost returns true if the URL is one we're willing to POST to.
-// v1 policy: localhost loopback only. External URLs would need an opt-in flag
-// and SSRF defenses (block private ranges, cloud metadata, etc.) — not yet built.
+// allowedWebhookHost returns nil if the URL is one we're willing to POST to.
+//
+// Default policy: only loopback targets are allowed. Specifically, the URL
+// must use http or https, and its hostname must be "localhost", "127.0.0.1",
+// "::1", or an IP literal that parses as a loopback address. No DNS is
+// resolved; the check is purely lexical so the result is the same whether
+// the receiver is reachable or not.
+//
+// Operators can loosen this policy by setting TASKS127_WEBHOOK_ALLOWED_HOSTS
+// to a comma-separated list of additional hostnames, which is useful for
+// containerized deployments where the webhook target is a sibling service
+// on a Docker network (e.g. `http://r1n-bridge:8080/events`). Only the
+// listed hostnames are accepted; arbitrary private ranges are not.
 func allowedWebhookHost(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -60,15 +91,17 @@ func allowedWebhookHost(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("missing host")
 	}
-	// Accept literal loopback hostnames and loopback IPs.
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return nil
 	}
-	ip := net.ParseIP(host)
-	if ip != nil && ip.IsLoopback() {
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return nil
 	}
-	return fmt.Errorf("only localhost webhooks are allowed in this build")
+	if extraAllowedWebhookHosts[host] {
+		return nil
+	}
+	return fmt.Errorf("host %q not allowed; loopback addresses are allowed by default, "+
+		"set TASKS127_WEBHOOK_ALLOWED_HOSTS to permit additional hostnames", host)
 }
 
 // generateWebhookSecret returns a high-entropy secret shown once to the caller
