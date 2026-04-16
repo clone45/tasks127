@@ -94,6 +94,55 @@ If you want the server reachable from outside localhost, set `TASKS127_BIND` to 
 
 There is also a `GET /healthz` endpoint that requires no authentication and returns `{"status":"ok"}`. It is the right thing to point a Docker healthcheck or uptime monitor at.
 
+## Running under Docker
+
+tasks127 is designed to run alongside whatever is going to consume it, so a Docker sidecar pattern fits naturally. Here is the shape most integrators end up with.
+
+The REST server runs in its own container with a persistent volume for the SQLite database:
+
+```yaml
+services:
+  tasks127:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM golang:1.26-alpine AS builder
+        RUN apk add --no-cache git ca-certificates
+        WORKDIR /src
+        RUN git clone https://github.com/clone45/tasks127.git . \
+         && git checkout ${TASKS127_REF:-main}
+        RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+              -o /out/tasks127 ./cmd/tasks127
+
+        FROM alpine:3.20
+        RUN apk add --no-cache ca-certificates tzdata
+        COPY --from=builder /out/tasks127 /usr/local/bin/tasks127
+        WORKDIR /data
+        EXPOSE 8080
+        CMD ["/usr/local/bin/tasks127"]
+    environment:
+      - TASKS127_BIND=0.0.0.0:8080
+      - TASKS127_DATABASE_URL=sqlite:///data/tasks127.db
+      - TASKS127_WEBHOOK_ALLOWED_HOSTS=your-agent
+    volumes:
+      - type: volume
+        source: tasks127_data
+        target: /data
+
+volumes:
+  tasks127_data:
+```
+
+Three things worth calling out.
+
+**Bind on `0.0.0.0` inside the container, not `127.0.0.1`.** The default `127.0.0.1:8080` means "localhost inside the container" and nothing else in the compose network can reach it. Binding on `0.0.0.0` is safe here because the container is not exposed to the host or to any reverse proxy. Only sibling containers on the compose network can reach it. If you want tasks127 reachable from outside the compose network, put a reverse proxy with TLS in front and keep this internal bind as it is.
+
+**The admin key prints once, on the first-ever boot.** If you bring the whole stack up in one `docker compose up -d --build` and tasks127 boots alongside a consumer that needs `TASKS127_API_KEY`, the consumer will come up with an empty key and fail. The smooth path is to bring tasks127 up first, capture the key from `docker compose logs tasks127 | grep -A1 "ADMIN API KEY"`, save it to your env file, then bring the rest of the stack up. Lost the key? If there is no real data yet, blow away the volume and start over. If there is, issue a replacement from the key you still have (see [docs/operators.md](docs/operators.md)).
+
+**The MCP server is the same binary, just a subcommand.** The most ergonomic pattern for MCP consumers is to build the same tasks127 binary into the consumer's image (multi-stage Go build, single `COPY --from=builder`), then reference it as `/usr/local/bin/tasks127` with `args: ["mcp"]` in the consumer's MCP config. That way there is no separate "MCP service" container to supervise, and `tasks127 mcp` is a short-lived stdio child owned by the consumer's process tree. Using `--http` is only worth it when several consumers need to share one MCP process.
+
+Pin `TASKS127_REF` to a tag, branch, or commit SHA when you want reproducible builds; otherwise it defaults to `main`.
+
 ## Key concepts
 
 The rest of this section walks through the ideas that make the API feel the way it does. You do not need to read it cover to cover to get started, but it will help if something surprises you later.
@@ -217,9 +266,9 @@ The server retries failed deliveries with exponential backoff up to six attempts
 
 #### Receiver patterns
 
-The `webhook_secret` returned from a subscription-creating call is shown exactly once. Your receiver needs that secret on every subsequent delivery to verify the HMAC, so the receiver has to persist it somewhere stable. Storing the secret only in agent memory is an antipattern: subscriptions outlive any single agent process, and if the agent restarts the receiver still needs the secret to validate incoming requests.
+The `webhook_secret` returned from a subscription-creating call is shown exactly once, and your receiver needs it on every subsequent delivery to verify the HMAC. Storing the secret only in agent memory is an antipattern, because subscriptions outlive any single agent process and a restart leaves the receiver unable to validate incoming requests.
 
-The common shape is: immediately after the agent creates a subscription, it hands the subscription ID, the URL, and the secret to the receiver over a private channel. The receiver stores the mapping from subscription ID to secret. When a delivery arrives, the receiver reads the `X-Tasks127-Subscription-Id` header, looks up the corresponding secret, and uses it to verify the signature. If you are running the receiver and the agent in the same process or the same container, "private channel" might just be an internal function call. If they are separate services, it is a small authenticated HTTP endpoint on the receiver side, or a shared secret store like a local SQLite file or a short-lived configuration secret.
+The full lifecycle pattern (agent-to-receiver handoff after `watch` returns, an `unwatch` companion endpoint, rotation semantics, and how pull and push integration shapes compare) lives in [docs/mcp.md](docs/mcp.md#subscription-lifecycle-patterns).
 
 ### MCP server for AI agents
 
@@ -248,9 +297,9 @@ Most MCP clients share the same configuration shape: an object keyed on a server
 }
 ```
 
-The `env` block above is not optional, and this is the single most common thing to trip over. When an MCP client spawns the tasks127 binary over stdio, it does not pass its own environment through to the child process. The official MCP SDKs restrict inheritance to a small set of basic variables (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER` on Linux) and nothing else. `TASKS127_URL` and `TASKS127_API_KEY` have to be named explicitly inside `env`, or the child will not see them. Most MCP clients support `${VAR}` interpolation inside these values, which is the right shape when you want to pull runtime values in from a container's environment rather than hardcoding them.
+The `env` block above is not optional, and this is the single most common thing to trip over. The example bakes values directly, but even if you would rather template them from your shell or container environment, the block is still required. MCP stdio transports, which covers OpenClaw, Claude Desktop, Claude Code, Cursor, and Zed (all built on the official MCP SDKs), do not inherit the parent process's full environment. The SDK restricts inheritance to a small POSIX set (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER` on Linux) and strips everything else before spawning the child. `TASKS127_URL` and `TASKS127_API_KEY` have to be named explicitly inside `env`. Most MCP clients support `${VAR}` interpolation inside `env` values, which lets you keep actual secrets out of the config file while still satisfying the SDK.
 
-If the `env` block is missing or misconfigured, the child process logs `tasks127 mcp: TASKS127_API_KEY is required` to stderr and exits. The client typically surfaces this as a generic "server failed to start" without showing the stderr message, so the failure mode is quieter than it should be.
+Getting this wrong is silent. The child exits with `tasks127 mcp: TASKS127_API_KEY is required` on stderr, and most clients surface that as a generic "MCP server failed to start" without showing the underlying message.
 
 For HTTP-based clients, run the MCP server as a separate long-lived process and point the client at it.
 

@@ -387,6 +387,29 @@ Returns:
 
 A typical agent heartbeat looks like: call `read_events` with the last-known cursor, process the batch, then call `ack_events` with the highest sequence number from the batch. The cursor survives across MCP sessions; the subscription itself owns it.
 
+## Subscription lifecycle patterns
+
+The `watch`, `unwatch`, `read_events`, and `ack_events` tools give you two meaningfully different integration shapes. The pull shape has the agent poll the inbox on a heartbeat and acknowledge batches. The push shape has tasks127 deliver events to a webhook URL the agent owns. Which one is right depends on how often events need to cause the agent to wake, and whether the agent can receive HTTP.
+
+The pull shape is the simpler default. Create a subscription without `webhook_url`. On each heartbeat, call `read_events` with the last cursor you persisted, process the batch, then call `ack_events` with the highest sequence number from the batch. The cursor survives across MCP sessions; the subscription itself owns it. No secrets to manage, no receiver to keep alive. The only downside is latency, since events surface at heartbeat cadence rather than immediately.
+
+The push shape trades complexity for immediacy. The webhook flow has one moving part the per-tool docs above do not spell out, so it is worth stating plainly: tasks127 returns `webhook_secret` exactly once, in the `watch` response, and never shows it again. The receiver needs that secret to verify deliveries. If the agent is the only thing holding it, a fresh agent session has no way to reconstruct it, and you are stuck cancelling and re-creating the subscription on every restart.
+
+The idiomatic flow looks like this:
+
+1. Agent calls `watch` with `webhook_url` pointing at the receiver.
+2. Receiver exposes a small registration endpoint, something like `POST /register-subscription` with `{subscription_id, webhook_secret}` in the body, and stores the pair in whatever persistence layer is appropriate. In-process memory is fine for a throwaway receiver; a local SQLite file or a secret store is appropriate for anything that needs to survive a restart.
+3. Immediately after `watch` returns, the agent hands `subscription_id` and `webhook_secret` to that endpoint in one call. This is the step that most commonly gets forgotten on first implementation. Its symptom is `401 bad signature` on every delivery because the receiver has no secret to verify against.
+4. On `unwatch`, the agent calls a companion endpoint (`POST /forget-subscription` or similar) to drop the secret from the receiver. Stale secrets in the receiver are harmless but accumulate.
+
+A few details worth knowing on the receiver side.
+
+The secret is immutable. The `PATCH /v1/subscriptions/{id}` endpoint does not expose it, and there is no rotation endpoint. To change a secret, cancel the subscription and create a new one.
+
+tasks127 retries failed deliveries with exponential backoff, and the inbox is the source of truth. A receiver that is briefly down does not lose events; it just gets them through `read_events` later instead of immediately via the webhook. This means you can treat the webhook path as an optimization. If the receiver is missing a secret and rejecting deliveries with 401, the agent can still pull the same events by calling `read_events` on the same subscription.
+
+Rotating the webhook URL itself is supported. `PATCH /v1/subscriptions/{id}` accepts `webhook_url`, so you can move a receiver to a new address without recreating the subscription or the secret.
+
 ## Error handling
 
 MCP tool errors carry the tasks127 REST API's error envelope in the message, so the agent sees structured information about what went wrong.
