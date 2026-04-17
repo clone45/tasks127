@@ -22,6 +22,8 @@ tasks127 does not have a web UI and there are no plans to add one. If you want h
 
 ## Quick start
 
+The recommended approach is not to do this yourself, but have Claude Code, or a similar agent help you through it.  Additional documentation can be found in the docs folder.
+
 Grab a release binary or build from source (see below), then just run it.
 
 ```
