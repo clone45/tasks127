@@ -181,7 +181,9 @@ func registerTools(s *sdk.Server, c *Client) {
 			"project_id or a three-letter project key. If the ticket has a project the " +
 			"display ID uses the project's key (e.g. BAK-14); otherwise it uses the team's key. " +
 			"parent is optional and makes this ticket a sub-ticket; remember that the two-level " +
-			"limit means the parent must itself be a top-level ticket.",
+			"limit means the parent must itself be a top-level ticket. priority is an integer " +
+			"0-4 following Linear's convention (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low) and " +
+			"defaults to 0 if omitted.",
 	}, toolCreateTicket(c))
 
 	sdk.AddTool(s, &sdk.Tool{
@@ -195,10 +197,10 @@ func registerTools(s *sdk.Server, c *Client) {
 		Description: `Search tickets using a filter. The filter is a JSON object where keys are ` +
 			`field names. Equality is a bare value: {"status":"open"}. Use operator objects for ` +
 			`richer comparisons: {"status":{"in":["open","in_progress"]}}, {"title":{"contains":"bug"}}, ` +
-			`{"created_at":{"gte":"2026-04-01T00:00:00Z"}}. Supported operators: eq, ne, gt, gte, ` +
-			`lt, lte, in, nin, contains, is_null. For OR use $or with an array of sub-filters. ` +
-			`Filterable fields: id, key, number, team_id, project_id, parent_id, title, description, ` +
-			`status, assignee_user_id, created_at, updated_at.`,
+			`{"priority":{"lte":2}}, {"created_at":{"gte":"2026-04-01T00:00:00Z"}}. Supported ` +
+			`operators: eq, ne, gt, gte, lt, lte, in, nin, contains, is_null. For OR use $or with ` +
+			`an array of sub-filters. Filterable fields: id, key, number, team_id, project_id, ` +
+			`parent_id, title, description, status, priority, assignee_user_id, created_at, updated_at.`,
 	}, toolSearchTickets(c))
 
 	sdk.AddTool(s, &sdk.Tool{
@@ -207,7 +209,8 @@ func registerTools(s *sdk.Server, c *Client) {
 			"ID). For bulk, pass where (a filter, same grammar as search_tickets) and every ticket " +
 			"matching it will be updated. Exactly one of ticket or where must be set. " +
 			"changes is a map of fields to new values; allowed fields are title, description, status, " +
-			"project_id, assignee_user_id. Status must be one of: open, in_progress, blocked, done, canceled. " +
+			"priority, project_id, assignee_user_id. Status must be one of: open, in_progress, blocked, " +
+			"done, canceled. Priority must be an integer 0-4 (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low). " +
 			"Bulk updates cannot change parent_id (the two-level rule requires per-ticket validation).",
 	}, toolUpdateTickets(c))
 
@@ -426,6 +429,7 @@ type createTicketArgs struct {
 	Project        string  `json:"project,omitempty" jsonschema:"optional project_id or three-letter project key"`
 	Parent         string  `json:"parent,omitempty" jsonschema:"optional parent ticket id or display ID (e.g. FOO-14); makes this a sub-ticket"`
 	Status         string  `json:"status,omitempty" jsonschema:"one of: open, in_progress, blocked, done, canceled (default: open)"`
+	Priority       *int    `json:"priority,omitempty" jsonschema:"integer 0-4 following Linear's convention: 0=None (default), 1=Urgent, 2=High, 3=Medium, 4=Low"`
 	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 	OnBehalfOf     string  `json:"on_behalf_of,omitempty" jsonschema:"optional user_id to create the ticket as; see tool descriptions"`
 }
@@ -465,6 +469,9 @@ func toolCreateTicket(c *Client) sdk.ToolHandlerFor[createTicketArgs, any] {
 		}
 		if a.Status != "" {
 			body["status"] = a.Status
+		}
+		if a.Priority != nil {
+			body["priority"] = *a.Priority
 		}
 		if a.AssigneeUserID != nil {
 			body["assignee_user_id"] = *a.AssigneeUserID

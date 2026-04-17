@@ -27,10 +27,21 @@ var ticketFields = map[string]filter.FieldSpec{
 	"title":            {Column: "title"},
 	"description":      {Column: "description"},
 	"status":           {Column: "status"},
+	"priority":         {Column: "priority"},
 	"assignee_user_id": {Column: "assignee_user_id"},
 	"created_at":       {Column: "created_at"},
 	"updated_at":       {Column: "updated_at"},
 }
+
+// Valid priority values. Matches Linear's convention:
+//   0 = None (default), 1 = Urgent, 2 = High, 3 = Medium, 4 = Low.
+// Sort order in Linear's UI is 1, 2, 3, 4, 0 (None shown last), which is not
+// what a plain ORDER BY produces. Callers wanting that order should filter
+// priority=0 out, or sort client-side.
+const (
+	priorityMin = 0
+	priorityMax = 4
+)
 
 type ticketResponse struct {
 	ID             string  `json:"id"`
@@ -43,13 +54,14 @@ type ticketResponse struct {
 	Title          string  `json:"title"`
 	Description    string  `json:"description"`
 	Status         string  `json:"status"`
+	Priority       int     `json:"priority"`
 	AssigneeUserID *string `json:"assignee_user_id"`
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
 	DeletedAt      *string `json:"deleted_at"`
 }
 
-const ticketCols = `id, key, number, team_id, project_id, parent_id, title, description, status, assignee_user_id, created_at, updated_at, deleted_at`
+const ticketCols = `id, key, number, team_id, project_id, parent_id, title, description, status, priority, assignee_user_id, created_at, updated_at, deleted_at`
 
 func scanTicketRow(scanner interface{ Scan(dest ...any) error }) (*ticketResponse, error) {
 	var t ticketResponse
@@ -57,7 +69,7 @@ func scanTicketRow(scanner interface{ Scan(dest ...any) error }) (*ticketRespons
 	var number sql.NullInt64
 	err := scanner.Scan(
 		&t.ID, &key, &number, &t.TeamID, &projectID, &parentID,
-		&t.Title, &t.Description, &t.Status, &assigneeID,
+		&t.Title, &t.Description, &t.Status, &t.Priority, &assigneeID,
 		&t.CreatedAt, &t.UpdatedAt, &deletedAt,
 	)
 	t.Key = key.String
@@ -228,6 +240,7 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Title          string  `json:"title"`
 		Description    string  `json:"description"`
 		Status         string  `json:"status"`
+		Priority       *int    `json:"priority"`
 		AssigneeUserID *string `json:"assignee_user_id"`
 	}
 	if err := readJSON(r, &input); err != nil {
@@ -244,6 +257,14 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	if !validStatuses[input.Status] {
 		writeError(w, http.StatusBadRequest, "invalid_field", "status must be one of: open, in_progress, blocked, done, canceled")
 		return
+	}
+	priority := 0
+	if input.Priority != nil {
+		priority = *input.Priority
+		if priority < priorityMin || priority > priorityMax {
+			writeError(w, http.StatusBadRequest, "invalid_field", "priority must be an integer 0-4 (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low)")
+			return
+		}
 	}
 
 	ctx := r.Context()
@@ -312,10 +333,10 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO tickets (id, key, number, team_id, project_id, parent_id, title, description, status, assignee_user_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tickets (id, key, number, team_id, project_id, parent_id, title, description, status, priority, assignee_user_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, key, number, input.TeamID, input.ProjectID, input.ParentID,
-		input.Title, input.Description, input.Status, input.AssigneeUserID,
+		input.Title, input.Description, input.Status, priority, input.AssigneeUserID,
 		now, now,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "failed to create ticket")
@@ -428,6 +449,22 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		}
 		sets = append(sets, "status = ?")
 		args = append(args, s)
+	}
+
+	if val, ok := body["priority"]; ok {
+		// JSON numbers decode into float64 by default.
+		f, ok := val.(float64)
+		if !ok || f != float64(int(f)) {
+			writeError(w, http.StatusBadRequest, "invalid_field", "priority must be an integer 0-4")
+			return
+		}
+		p := int(f)
+		if p < priorityMin || p > priorityMax {
+			writeError(w, http.StatusBadRequest, "invalid_field", "priority must be 0-4 (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low)")
+			return
+		}
+		sets = append(sets, "priority = ?")
+		args = append(args, p)
 	}
 
 	if val, ok := body["project_id"]; ok {
@@ -602,7 +639,7 @@ func (s *Server) handleRestoreTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 var ticketSettable = map[string]bool{
-	"title": true, "description": true, "status": true,
+	"title": true, "description": true, "status": true, "priority": true,
 	"project_id": true, "assignee_user_id": true,
 }
 
@@ -624,6 +661,13 @@ func (s *Server) handleBulkUpdateTickets(w http.ResponseWriter, r *http.Request)
 		s, isStr := v.(string)
 		if !isStr || !validStatuses[s] {
 			writeError(w, http.StatusBadRequest, "invalid_set", "status must be one of: open, in_progress, blocked, done, canceled")
+			return
+		}
+	}
+	if v, ok := body.Set["priority"]; ok {
+		f, isNum := v.(float64)
+		if !isNum || f != float64(int(f)) || int(f) < priorityMin || int(f) > priorityMax {
+			writeError(w, http.StatusBadRequest, "invalid_set", "priority must be an integer 0-4")
 			return
 		}
 	}

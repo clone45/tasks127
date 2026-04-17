@@ -615,11 +615,12 @@ Request:
   "project_id": "01HX...",
   "parent_id": null,
   "status": "open",
+  "priority": 2,
   "assignee_user_id": null
 }
 ```
 
-Only `team_id` and `title` are required. `status` defaults to `open` and must be one of: `open`, `in_progress`, `blocked`, `done`, `canceled`. `parent_id` enforces the two-level rule at create time. `assignee_user_id`, if set, must be an active member of the ticket's team.
+Only `team_id` and `title` are required. `status` defaults to `open` and must be one of: `open`, `in_progress`, `blocked`, `done`, `canceled`. `priority` defaults to `0` and must be an integer 0-4 following Linear's convention: `0` = None, `1` = Urgent, `2` = High, `3` = Medium (also called "Normal"), `4` = Low. `parent_id` enforces the two-level rule at create time. `assignee_user_id`, if set, must be an active member of the ticket's team.
 
 Response (201):
 
@@ -635,12 +636,15 @@ Response (201):
   "title": "Set up CI pipeline",
   "description": "Wire up GitHub Actions for the main repo",
   "status": "open",
+  "priority": 2,
   "assignee_user_id": null,
   "created_at": "...",
   "updated_at": "...",
   "deleted_at": null
 }
 ```
+
+A note on sort order. Linear's UI displays priorities as `1, 2, 3, 4, 0`, showing `None` last rather than first. That order is not what a plain `ORDER BY priority ASC` produces, because natural integer order puts `0` first. If you want Linear's visual order, either exclude `priority = 0` from your query and sort the rest `ASC`, or fetch with natural order and re-arrange on the client. The field itself is a straightforward integer and the filter DSL treats it as such.
 
 ### GET /v1/tickets/{id}
 
@@ -690,7 +694,7 @@ curl -X POST -H "Authorization: Bearer $KEY" $A/v1/tickets/BAK-1/restore
 
 ### POST /v1/tickets/search
 
-Search. Scoped by team visibility. Filterable fields: `id`, `key`, `number`, `team_id`, `project_id`, `parent_id`, `title`, `description`, `status`, `assignee_user_id`, `created_at`, `updated_at`.
+Search. Scoped by team visibility. Filterable fields: `id`, `key`, `number`, `team_id`, `project_id`, `parent_id`, `title`, `description`, `status`, `priority`, `assignee_user_id`, `created_at`, `updated_at`.
 
 Example: find all open tickets assigned to a user.
 
@@ -734,7 +738,7 @@ Response:
 {"affected": 17, "ids": ["01HX...", "..."]}
 ```
 
-Settable in bulk: `title`, `description`, `status`, `project_id`, `assignee_user_id`. Not settable in bulk: `parent_id` (the two-level rule requires per-ticket validation), `team_id` (immutable).
+Settable in bulk: `title`, `description`, `status`, `priority`, `project_id`, `assignee_user_id`. Not settable in bulk: `parent_id` (the two-level rule requires per-ticket validation), `team_id` (immutable).
 
 ### DELETE /v1/tickets
 
