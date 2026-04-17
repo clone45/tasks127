@@ -1,6 +1,6 @@
 # tasks127
 
-A lightweight, headless ticketing API built for AI agents. Think of it as a self-hosted alternative to Linear or Jira that you run on the same machine as whatever will be talking to it.
+A lightweight, headless ticketing API built for AI agents. Think of it as a self-hosted alternative to Linear or Jira that you run on the same machine as whatever will be talking to it, such as OpenClaw agents.
 
 The name is a nod to 127.0.0.1. By default the server binds to localhost only, and webhooks can only point at localhost. The whole design assumes you are running tasks127 alongside the thing that is going to consume it, not exposing it to the open internet.
 
