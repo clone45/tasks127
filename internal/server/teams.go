@@ -134,7 +134,11 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		input.Key, id,
 	); err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "key_conflict", "key is already taken by another team or project")
+			writeError(w, http.StatusConflict, "key_conflict",
+				"this key is already taken by another team or project. Keys are globally unique across both teams and projects "+
+					"so that ticket display IDs like FOO-14 unambiguously identify a single ticket. Pick a different three-letter uppercase key. "+
+					"Note that keys from soft-deleted teams or projects are not released; if you see a conflict with no obvious owner, "+
+					"search with $include_deleted=true to find the holder, and either restore that resource or pick a different key.")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", "failed to reserve key")

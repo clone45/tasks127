@@ -143,16 +143,19 @@ func (s *Server) validateParentTicket(ctx context.Context, parentID, teamID stri
 		`SELECT team_id, parent_id FROM tickets WHERE id = ? AND deleted_at IS NULL`, parentID,
 	).Scan(&pTeamID, &pParentID)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("parent ticket not found")
+		return fmt.Errorf("parent ticket not found (either no such ticket, or you do not have visibility into its team)")
 	}
 	if err != nil {
 		return err
 	}
 	if pTeamID != teamID {
-		return fmt.Errorf("parent ticket is in a different team")
+		return fmt.Errorf("parent ticket belongs to a different team. A ticket's parent must be in the same team, " +
+			"because team is the visibility boundary and parent/child tickets need to share it")
 	}
 	if pParentID.Valid {
-		return fmt.Errorf("parent is already a sub-ticket (two-level limit)")
+		return fmt.Errorf("the proposed parent is itself a sub-ticket. tasks127 only supports two levels of nesting " +
+			"(a ticket can have a parent, but that parent cannot itself have a parent). Either pick a top-level ticket " +
+			"as the parent, or clear the proposed parent's parent_id first to promote it")
 	}
 	return nil
 }
@@ -414,7 +417,10 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, ok := body["team_id"]; ok {
-		writeError(w, http.StatusBadRequest, "immutable_field", "team_id cannot be changed after creation")
+		writeError(w, http.StatusBadRequest, "immutable_field",
+			"team_id is immutable on tickets. Changing it would invalidate the assignee (who must be a member of the ticket's team) "+
+				"and the project (which must belong to the same team), so tasks127 does not allow it. "+
+				"To move work to a different team, create a new ticket there and close this one. Display IDs do not transfer.")
 		return
 	}
 
@@ -495,7 +501,8 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if pid == id {
-				writeError(w, http.StatusUnprocessableEntity, "invalid_parent", "a ticket cannot be its own parent")
+				writeError(w, http.StatusUnprocessableEntity, "invalid_parent",
+					"a ticket cannot be its own parent. Pick a different ticket as the parent, or clear parent_id by passing null to make this a top-level ticket.")
 				return
 			}
 			if err := s.validateParentTicket(ctx, pid, current.TeamID); err != nil {
@@ -504,7 +511,10 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 			}
 			hasChildren, _ := s.ticketHasChildren(ctx, id)
 			if hasChildren {
-				writeError(w, http.StatusUnprocessableEntity, "invalid_parent", "ticket has sub-tickets and cannot become a sub-ticket itself (two-level limit)")
+				writeError(w, http.StatusUnprocessableEntity, "invalid_parent",
+					"this ticket has sub-tickets, so making it a sub-ticket itself would create a three-deep chain. "+
+						"tasks127 only supports two levels of nesting (a ticket can have a parent, but that parent cannot itself have a parent). "+
+						"To reparent this ticket, first move its children elsewhere or promote them to top-level.")
 				return
 			}
 			sets = append(sets, "parent_id = ?")

@@ -128,7 +128,9 @@ func (s *Server) handleCreateTeamMember(w http.ResponseWriter, r *http.Request) 
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "conflict", "user is already a member of this team")
+			writeError(w, http.StatusConflict, "conflict",
+				"this user is already an active member of this team, so a duplicate membership row cannot be created. "+
+					"If a previous membership was soft-deleted, restore it via POST /v1/team-members/{id}/restore instead of adding a new one.")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", "failed to add team member")
@@ -199,7 +201,9 @@ func (s *Server) handleRestoreTeamMember(w http.ResponseWriter, r *http.Request)
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "conflict", "user is already an active member of this team")
+			writeError(w, http.StatusConflict, "conflict",
+				"restoring this membership would conflict with an active membership row already linking the same user and team. "+
+					"Either keep the current membership and delete this deleted one, or soft-delete the active one first if you specifically need this row's id restored.")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", "failed to restore team member")

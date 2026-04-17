@@ -122,7 +122,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "conflict", "email already exists")
+			writeError(w, http.StatusConflict, "conflict",
+				"the email is already in use by another active user. Emails are unique across non-deleted users. "+
+					"If the existing user was soft-deleted and you want to reuse their record, restore them via POST /v1/users/{id}/restore "+
+					"and search for them first with a $include_deleted filter. Otherwise, pick a different email.")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", "failed to create user")
@@ -199,7 +202,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	res, err := s.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "conflict", "email already exists")
+			writeError(w, http.StatusConflict, "conflict",
+				"the email is already in use by another active user. Emails are unique across non-deleted users. "+
+					"If the existing user was soft-deleted and you want to reuse their record, restore them via POST /v1/users/{id}/restore "+
+					"and search for them first with a $include_deleted filter. Otherwise, pick a different email.")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", "failed to update user")
@@ -257,7 +263,9 @@ func (s *Server) handleRestoreUser(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "conflict", "email conflicts with an existing active user")
+			writeError(w, http.StatusConflict, "conflict",
+				"restoring this user would conflict with an existing active user who now holds the same email. "+
+					"Either soft-delete the active user first, change the active user's email, or leave the deleted user deleted.")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal", "failed to restore user")

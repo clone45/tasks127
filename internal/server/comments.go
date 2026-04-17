@@ -145,7 +145,12 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if input.AuthorUserID != "" && input.AuthorUserID != effectiveID {
-			writeError(w, http.StatusForbidden, "forbidden", "cannot author comments as another user")
+			writeError(w, http.StatusForbidden, "forbidden",
+				"you are calling scoped to a specific user (either with a user-tier key or with X-On-Behalf-Of), "+
+					"but author_user_id names a different user. In scoped mode the author must match the effective user, or be omitted "+
+					"(in which case the effective user is used automatically). "+
+					"To author a comment for a different user, call as an unrestricted admin (admin-tier key with no X-On-Behalf-Of) "+
+					"and pass author_user_id explicitly.")
 			return
 		}
 		input.AuthorUserID = effectiveID
@@ -229,7 +234,9 @@ func (s *Server) handleUpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.canEditComment(r, current) {
-		writeError(w, http.StatusForbidden, "forbidden", "only the author can edit this comment")
+		writeError(w, http.StatusForbidden, "forbidden",
+			"only the author can edit this comment. If you need to edit a comment by a different user, call as an unrestricted admin "+
+				"(admin-tier API key with no X-On-Behalf-Of header) instead.")
 		return
 	}
 
@@ -279,7 +286,9 @@ func (s *Server) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.canEditComment(r, current) {
-		writeError(w, http.StatusForbidden, "forbidden", "only the author can delete this comment")
+		writeError(w, http.StatusForbidden, "forbidden",
+			"only the author can delete this comment. If you need to delete a comment by a different user, call as an unrestricted admin "+
+				"(admin-tier API key with no X-On-Behalf-Of header) instead.")
 		return
 	}
 
@@ -313,7 +322,9 @@ func (s *Server) handleRestoreComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.canEditComment(r, current) {
-		writeError(w, http.StatusForbidden, "forbidden", "only the author can restore this comment")
+		writeError(w, http.StatusForbidden, "forbidden",
+			"only the author can restore this comment. If you need to restore a comment by a different user, call as an unrestricted admin "+
+				"(admin-tier API key with no X-On-Behalf-Of header) instead.")
 		return
 	}
 

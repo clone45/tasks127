@@ -38,13 +38,16 @@ func (s *Server) effectiveUserID(ctx context.Context) (userID string, unrestrict
 }
 
 // requireAdmin writes a 403 and returns false if the effective principal
-// is not an unscoped admin. Admin-with-OBO is NOT admin for this purpose —
+// is not an unscoped admin. Admin-with-OBO is NOT admin for this purpose;
 // using OBO is voluntarily scoping yourself to a user's capabilities.
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if _, unrestricted := s.effectiveUserID(r.Context()); unrestricted {
 		return true
 	}
-	writeError(w, http.StatusForbidden, "forbidden", "admin privileges required")
+	writeError(w, http.StatusForbidden, "forbidden",
+		"this operation requires an unrestricted admin (admin-tier API key with no X-On-Behalf-Of header). "+
+			"If you are currently using X-On-Behalf-Of to act as a specific user, drop that header and retry. "+
+			"If your key is user-tier, an admin needs to either issue an admin-tier key or perform this action for you.")
 	return false
 }
 

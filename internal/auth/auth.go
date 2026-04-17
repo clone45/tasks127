@@ -37,7 +37,9 @@ func Middleware(db *sql.DB) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearer(r)
 			if token == "" {
-				WriteError(w, http.StatusUnauthorized, "missing_token", "Authorization: Bearer <token> required")
+				WriteError(w, http.StatusUnauthorized, "missing_token",
+					"Authorization header is missing or malformed. Every request except GET /healthz requires "+
+						"'Authorization: Bearer <token>' with a valid API key. If you do not have one, an admin can mint one via POST /v1/api-keys.")
 				return
 			}
 
@@ -55,7 +57,9 @@ func Middleware(db *sql.DB) func(http.Handler) http.Handler {
 			).Scan(&keyID, &tier, &userID, &expiresAt)
 
 			if err == sql.ErrNoRows {
-				WriteError(w, http.StatusUnauthorized, "invalid_token", "invalid or revoked API key")
+				WriteError(w, http.StatusUnauthorized, "invalid_token",
+					"the API key does not exist or has been revoked. Revoked keys can be restored via POST /v1/api-keys/{id}/restore "+
+						"if the revocation was accidental. Otherwise an admin can mint a new key via POST /v1/api-keys.")
 				return
 			}
 			if err != nil {
@@ -64,7 +68,9 @@ func Middleware(db *sql.DB) func(http.Handler) http.Handler {
 			}
 
 			if expiresAt.Valid && expiresAt.Time.Before(time.Now()) {
-				WriteError(w, http.StatusUnauthorized, "expired_token", "API key has expired")
+				WriteError(w, http.StatusUnauthorized, "expired_token",
+					"this API key's expires_at timestamp is in the past. An admin can extend it via PATCH /v1/api-keys/{id} "+
+						"with {\"expires_at\": \"<new RFC3339 timestamp>\"}, or mint a replacement key via POST /v1/api-keys.")
 				return
 			}
 
@@ -75,7 +81,10 @@ func Middleware(db *sql.DB) func(http.Handler) http.Handler {
 
 			if obo := r.Header.Get("X-On-Behalf-Of"); obo != "" {
 				if p.Tier != "admin" {
-					WriteError(w, http.StatusBadRequest, "impersonation_denied", "X-On-Behalf-Of requires admin tier")
+					WriteError(w, http.StatusBadRequest, "impersonation_denied",
+						"X-On-Behalf-Of can only be set by admin-tier API keys. It scopes a request to the named user's "+
+							"visibility and capabilities, which only admins are allowed to do. If you need this behavior, "+
+							"use an admin-tier key. User-tier keys authenticate as the user they are bound to and cannot impersonate others.")
 					return
 				}
 				var exists bool
