@@ -133,7 +133,14 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 	effectiveID, unrestricted := s.effectiveUserID(ctx)
 	if unrestricted {
 		if input.AuthorUserID == "" {
-			writeError(w, http.StatusBadRequest, "missing_field", "author_user_id is required for unrestricted admin")
+			writeError(w, http.StatusBadRequest, "missing_field",
+				"author_user_id is required when calling as an unrestricted admin (admin-tier API key with no X-On-Behalf-Of header), "+
+					"because there is no implicit identity to attribute the comment to. "+
+					"Two remedies: pass author_user_id in the request body to specify who the comment is from, "+
+					"or set the X-On-Behalf-Of header to a user_id to scope the whole request as that user. "+
+					"If you do not yet have a user to attribute to (for example, you are an agent that needs its own identity), "+
+					"provision one first via the create_user MCP tool or POST /v1/users, "+
+					"and add it to the relevant team with add_team_member or POST /v1/team-members.")
 			return
 		}
 	} else {
