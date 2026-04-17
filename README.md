@@ -6,7 +6,7 @@ The name is a nod to 127.0.0.1. By default the server binds to localhost only, a
 
 ## Why this exists
 
-AI agents that manage tickets, for example an agent that fields requests over Telegram and records them as work items, run into problems that traditional ticketing APIs were never designed for.
+AI agents run into problems that traditional ticketing APIs were never designed for.
 
 Two problems in particular are noteworthy.
 
