@@ -8,7 +8,7 @@ The name is a nod to 127.0.0.1. By default the server binds to localhost only, a
 
 AI agents that manage tickets, for example an agent that fields requests over Telegram and records them as work items, run into problems that traditional ticketing APIs were never designed for.
 
-Two problems in particular come up again and again.
+Two problems in particular are noteworthy.
 
 The first is iteration cost. If an agent wants to close every ticket in a project, a traditional API forces it to fetch those tickets one at a time and then issue N separate updates. Every one of those calls costs tokens and round trip time. tasks127 lets the agent do this in a single call by accepting a filter in place of a list of IDs.
 
