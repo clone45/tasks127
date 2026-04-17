@@ -93,7 +93,8 @@ func buildOrder(clauses []OrderClause, allowed map[string]FieldSpec) (string, er
 	for _, c := range clauses {
 		spec, ok := allowed[c.Field]
 		if !ok {
-			return "", fmt.Errorf("cannot order by unknown field: %s", c.Field)
+			return "", fmt.Errorf("cannot order by %q: this field is not in the resource's allowlist of orderable fields. "+
+				"Each resource exposes a fixed list of filterable and orderable fields; see docs/api.md for the list per resource", c.Field)
 		}
 		dir := "ASC"
 		if strings.EqualFold(c.Dir, "desc") {
@@ -128,14 +129,17 @@ func buildWhere(where map[string]any, allowed map[string]FieldSpec) (string, []a
 				args = append(args, a...)
 
 			default:
-				return "", nil, fmt.Errorf("unknown directive: %s", key)
+				return "", nil, fmt.Errorf("unknown top-level directive %q. Only $and and $or are supported as grouping directives "+
+					"(shape: {\"$or\":[{...},{...}]}); every other top-level key must be a field name from the resource's filterable-fields allowlist", key)
 			}
 			continue
 		}
 
 		spec, ok := allowed[key]
 		if !ok {
-			return "", nil, fmt.Errorf("unknown field: %s", key)
+			return "", nil, fmt.Errorf("unknown field %q. Each resource has a fixed allowlist of filterable fields; "+
+				"see docs/api.md for the list per resource. If the field you want exists on the resource but is not accepted by the filter DSL, "+
+				"that is deliberate (some columns are not indexed for filtering)", key)
 		}
 
 		sql, a, err := buildFieldCondition(spec.Column, val)
@@ -155,7 +159,7 @@ func buildWhere(where map[string]any, allowed map[string]FieldSpec) (string, []a
 func buildCombinator(val any, allowed map[string]FieldSpec, joiner string) (string, []any, error) {
 	arr, ok := val.([]any)
 	if !ok {
-		return "", nil, fmt.Errorf("$and/$or must be an array")
+		return "", nil, fmt.Errorf("$and/$or must be an array of filter objects. Shape: {\"$or\":[{\"field1\":\"value\"},{\"field2\":{\"gte\":42}}]}")
 	}
 
 	var parts []string
@@ -163,7 +167,8 @@ func buildCombinator(val any, allowed map[string]FieldSpec, joiner string) (stri
 	for _, item := range arr {
 		m, ok := item.(map[string]any)
 		if !ok {
-			return "", nil, fmt.Errorf("$and/$or elements must be objects")
+			return "", nil, fmt.Errorf("each element of $and/$or must be a filter object, not a string, number, or array. " +
+				"Shape: {\"$or\":[{\"field1\":\"value\"},{\"field2\":{\"gte\":42}}]}")
 		}
 		sql, a, err := buildWhere(m, allowed)
 		if err != nil {
@@ -189,7 +194,9 @@ func buildFieldCondition(column string, val any) (string, []any, error) {
 	case map[string]any:
 		return buildOperators(column, v)
 	default:
-		return "", nil, fmt.Errorf("unsupported value type")
+		return "", nil, fmt.Errorf("unsupported value type %T for a field predicate: expected a scalar (string, number, bool, null) "+
+			"for equality, or an operator object like {\"gte\":10} or {\"in\":[\"a\",\"b\"]}. Supported operators: "+
+			"eq, ne, gt, gte, lt, lte, in, nin, contains, is_null", val)
 	}
 }
 
@@ -250,7 +257,8 @@ func buildOperators(column string, ops map[string]any) (string, []any, error) {
 		case "contains":
 			s, ok := val.(string)
 			if !ok {
-				return "", nil, fmt.Errorf("contains requires a string")
+				return "", nil, fmt.Errorf("contains requires a string value (case-insensitive substring match). " +
+					"Shape: {\"field\":{\"contains\":\"substring\"}}")
 			}
 			escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(s)
 			clauses = append(clauses, "LOWER("+column+") LIKE ? ESCAPE '\\'")
@@ -259,7 +267,8 @@ func buildOperators(column string, ops map[string]any) (string, []any, error) {
 		case "is_null":
 			b, ok := val.(bool)
 			if !ok {
-				return "", nil, fmt.Errorf("is_null requires a boolean")
+				return "", nil, fmt.Errorf("is_null requires a boolean: true to match NULL, false to match NOT NULL. " +
+					"Shape: {\"field\":{\"is_null\":true}}")
 			}
 			if b {
 				clauses = append(clauses, column+" IS NULL")
@@ -268,7 +277,8 @@ func buildOperators(column string, ops map[string]any) (string, []any, error) {
 			}
 
 		default:
-			return "", nil, fmt.Errorf("unknown operator: %s", op)
+			return "", nil, fmt.Errorf("unknown operator %q. Supported operators: eq, ne, gt, gte, lt, lte, in, nin, contains, is_null. "+
+				"For OR/AND grouping use the top-level $or or $and combinators. See docs/api.md 'The filter language' for the full syntax", op)
 		}
 	}
 
@@ -281,7 +291,8 @@ func buildOperators(column string, ops map[string]any) (string, []any, error) {
 func buildIn(column string, val any, negate bool) (string, []any, error) {
 	arr, ok := val.([]any)
 	if !ok {
-		return "", nil, fmt.Errorf("in/nin requires an array")
+		return "", nil, fmt.Errorf("in/nin requires an array of values. Shape: {\"field\":{\"in\":[\"value1\",\"value2\"]}}. " +
+			"An empty array is accepted: in matches nothing, nin matches everything")
 	}
 	if len(arr) == 0 {
 		if negate {

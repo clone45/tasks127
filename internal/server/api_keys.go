@@ -150,7 +150,10 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.UserID != nil {
 		if ok, _ := s.activeExists(r.Context(), "users", *input.UserID); !ok {
-			writeError(w, http.StatusBadRequest, "invalid_reference", "user not found")
+			writeError(w, http.StatusBadRequest, "invalid_reference",
+				"user not found. The user_id you passed does not exist or is soft-deleted. "+
+					"Verify it with search_users. If you meant to create an admin-tier key (which has no associated user), "+
+					"omit user_id and set tier to \"admin\" instead.")
 			return
 		}
 	}

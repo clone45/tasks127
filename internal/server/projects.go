@@ -120,11 +120,15 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.canAccessTeam(r.Context(), input.TeamID) {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "team not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"team not found. The team either does not exist, is soft-deleted, or is not visible to the caller. "+
+				"Use list_teams to see which teams you can reference.")
 		return
 	}
 	if ok, _ := s.activeExists(r.Context(), "teams", input.TeamID); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "team not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"team not found. The team either does not exist, is soft-deleted, or is not visible to the caller. "+
+				"Use list_teams to see which teams you can reference.")
 		return
 	}
 

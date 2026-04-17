@@ -163,7 +163,9 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		`SELECT team_id, deleted_at FROM tickets WHERE id = ?`, input.TicketID,
 	).Scan(&ticketTeamID, &ticketDeleted)
 	if err == sql.ErrNoRows || (err == nil && ticketDeleted.Valid) {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "ticket not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"ticket not found. The ticket either does not exist (check the display ID or ULID), is soft-deleted, "+
+				"or you do not have visibility into its team.")
 		return
 	}
 	if err != nil {
@@ -171,13 +173,18 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.canAccessTeam(ctx, ticketTeamID) {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "ticket not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"ticket not found. The ticket either does not exist (check the display ID or ULID), is soft-deleted, "+
+				"or you do not have visibility into its team.")
 		return
 	}
 
 	// Validate author exists.
 	if ok, _ := s.activeExists(ctx, "users", input.AuthorUserID); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "author user not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"author_user_id references a user that does not exist or is soft-deleted. "+
+				"Verify the id with search_users, or omit author_user_id entirely to attribute the comment to the effective user automatically "+
+				"(only works when calling as a user-tier key or with X-On-Behalf-Of set).")
 		return
 	}
 

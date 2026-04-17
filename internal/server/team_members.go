@@ -111,11 +111,17 @@ func (s *Server) handleCreateTeamMember(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if ok, _ := s.activeExists(r.Context(), "teams", input.TeamID); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "team not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"team not found. The team either does not exist, is soft-deleted, or is not visible to the caller. "+
+				"Use list_teams to see which teams you can reference (admin-unrestricted callers see all teams; "+
+				"user-tier and on-behalf-of callers see only the teams they belong to).")
 		return
 	}
 	if ok, _ := s.activeExists(r.Context(), "users", input.UserID); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "user not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"user not found. The user either does not exist, is soft-deleted, or is not visible to the caller. "+
+				"Use search_users to find visible users (admin-unrestricted callers see all; "+
+				"user-tier and on-behalf-of callers see themselves plus users in shared teams).")
 		return
 	}
 

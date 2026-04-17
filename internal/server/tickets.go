@@ -131,7 +131,9 @@ func (s *Server) validateProjectInTeam(ctx context.Context, projectID, teamID st
 		projectID, teamID,
 	).Scan(&ok)
 	if !ok {
-		return fmt.Errorf("project not found or not in this team")
+		return fmt.Errorf("project not found, not in the specified team, or soft-deleted. " +
+			"A ticket's project must belong to the same team as the ticket itself. " +
+			"Use list_projects with a team filter to find eligible projects")
 	}
 	return nil
 }
@@ -167,7 +169,9 @@ func (s *Server) validateAssigneeInTeam(ctx context.Context, userID, teamID stri
 		userID, teamID,
 	).Scan(&ok)
 	if !ok {
-		return fmt.Errorf("assignee is not a member of the ticket's team")
+		return fmt.Errorf("the proposed assignee is not an active member of the ticket's team. " +
+			"Assignees must belong to the team they are being assigned within. " +
+			"Either add the user to the team first via add_team_member, or pick a user who is already a member")
 	}
 	return nil
 }
@@ -273,11 +277,15 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if !s.canAccessTeam(ctx, input.TeamID) {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "team not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"team not found. The team either does not exist, is soft-deleted, or is not visible to the caller. "+
+				"Use list_teams to see which teams you can reference.")
 		return
 	}
 	if ok, _ := s.activeExists(ctx, "teams", input.TeamID); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_reference", "team not found")
+		writeError(w, http.StatusBadRequest, "invalid_reference",
+			"team not found. The team either does not exist, is soft-deleted, or is not visible to the caller. "+
+				"Use list_teams to see which teams you can reference.")
 		return
 	}
 	if input.ProjectID != nil {
