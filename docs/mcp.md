@@ -360,12 +360,13 @@ Arguments:
   "project": "BAK",
   "parent": "BAK-3",
   "status": "open",
+  "priority": 2,
   "assignee_user_id": "01HX...",
   "on_behalf_of": "01HX..."
 }
 ```
 
-`team` and `title` are required. `parent` accepts either a ULID or a display ID. `status` defaults to `open` and must be one of `open`, `in_progress`, `blocked`, `done`, `canceled`.
+`team` and `title` are required. `parent` accepts either a ULID or a display ID. `status` defaults to `open` and must be one of `open`, `in_progress`, `blocked`, `done`, `canceled`. `priority` is an optional integer 0-4 following Linear's convention (`0` = None, `1` = Urgent, `2` = High, `3` = Medium, `4` = Low) and defaults to `0` if omitted.
 
 Returns the created ticket row, including its assigned `display_id`.
 
@@ -394,6 +395,7 @@ Arguments:
 {
   "where": {
     "status": {"in": ["open", "in_progress"]},
+    "priority": {"lte": 2},
     "assignee_user_id": "01HX..."
   },
   "order_by": [{"field": "created_at", "dir": "desc"}],
@@ -402,7 +404,9 @@ Arguments:
 }
 ```
 
-Filterable fields: `id`, `key`, `number`, `team_id`, `project_id`, `parent_id`, `title`, `description`, `status`, `assignee_user_id`, `created_at`, `updated_at`.
+Filterable fields: `id`, `key`, `number`, `team_id`, `project_id`, `parent_id`, `title`, `description`, `status`, `priority`, `assignee_user_id`, `created_at`, `updated_at`.
+
+`priority` is an integer 0-4 using Linear's convention (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low). The example above selects all open or in-progress tickets that are Urgent or High priority and assigned to a specific user. Note that a plain `order_by` on priority uses natural integer order (0 first), which is the opposite of Linear's UI convention (1 first, 0 last); exclude `priority = 0` from the filter if you want Linear's reading order.
 
 Returns a search envelope of ticket rows.
 
@@ -415,7 +419,7 @@ Single-ticket form:
 ```json
 {
   "ticket": "BAK-1",
-  "changes": {"status": "in_progress", "assignee_user_id": "01HX..."},
+  "changes": {"status": "in_progress", "priority": 1, "assignee_user_id": "01HX..."},
   "on_behalf_of": "01HX..."
 }
 ```
@@ -430,7 +434,7 @@ Bulk form:
 }
 ```
 
-Settable fields: `title`, `description`, `status`, `project_id`, `assignee_user_id`. `parent_id` is not settable in bulk (the two-level rule requires per-ticket validation); use the single form or the REST API for that. `team_id` is immutable once the ticket is created.
+Settable fields: `title`, `description`, `status`, `priority`, `project_id`, `assignee_user_id`. `parent_id` is not settable in bulk (the two-level rule requires per-ticket validation); use the single form or the REST API for that. `team_id` is immutable once the ticket is created. `priority` must be an integer 0-4 (0=None, 1=Urgent, 2=High, 3=Medium, 4=Low).
 
 Single form returns the updated ticket row. Bulk form returns an affected count:
 
